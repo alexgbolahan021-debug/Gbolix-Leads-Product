@@ -1,33 +1,91 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { Streamdown } from 'streamdown';
+import { trpc } from "@/lib/trpc";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * All content in this page are only for example, replace with your own feature implementation
- * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
- */
+type SourceMode = "csv" | "domains";
+
+const sampleCsv = `Business Name,Website,Email,Phone,Industry,City,Region,Country
+Northline Dining,https://example.com,hello@example.com,+1 555 010 1000,Restaurant,Chicago,IL,US
+Harbor Realty,https://example.org,contact@example.org,+1 555 010 2000,Real Estate,Miami,FL,US`;
+
+const newRequestId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+const stateLabel = (state?: string | null) => (state ?? "unavailable").replaceAll("_", " ");
+
 export default function Home() {
-  // The useAuth hook provides authentication state.
-  // To implement login/logout, call logout(), or start login from an event
-  // handler: onClick={() => startLogin()} (imported from "@/const"). Never call
-  // startLogin() during render (no href={startLogin()}) — it mints a one-time
-  // nonce cookie and must run only at the moment of navigation.
-  let { user, loading, error, isAuthenticated, logout } = useAuth();
+  const { user, loading, isAuthenticated, logout } = useAuth();
+  const [sourceMode, setSourceMode] = useState<SourceMode>("csv");
+  const [content, setContent] = useState(sampleCsv);
+  const [label, setLabel] = useState("Agency benchmark intake");
+  const [categoryCode, setCategoryCode] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [focusedLeadId, setFocusedLeadId] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const utils = trpc.useUtils();
+  const bootstrap = trpc.leads.bootstrap.useQuery(undefined, { enabled: isAuthenticated });
+  const leads = trpc.leads.list.useQuery(undefined, { enabled: isAuthenticated });
+  const jobs = trpc.leads.jobs.useQuery(undefined, { enabled: isAuthenticated });
+  const exportHistory = trpc.leads.exports.useQuery(undefined, { enabled: isAuthenticated });
+  const detail = trpc.leads.detail.useQuery({ leadId: focusedLeadId || "pending" }, { enabled: Boolean(focusedLeadId) && isAuthenticated });
+  const ingestCsv = trpc.leads.ingestCsv.useMutation({ onSuccess: () => utils.leads.list.invalidate() });
+  const ingestDomains = trpc.leads.ingestDomains.useMutation({ onSuccess: () => utils.leads.list.invalidate() });
+  const enrich = trpc.leads.enrich.useMutation({ onSuccess: () => { utils.leads.list.invalidate(); detail.refetch(); } });
+  const infer = trpc.leads.infer.useMutation({ onSuccess: () => detail.refetch() });
+  const exportSelected = trpc.leads.exportSelected.useMutation();
+  const authorizeExport = trpc.leads.authorizeExportDownload.useMutation({ onSuccess: data => window.location.assign(data.url) });
+  useEffect(() => {
+    if (!categoryCode && bootstrap.data?.categories[0]?.code) setCategoryCode(bootstrap.data.categories[0].code);
+  }, [bootstrap.data, categoryCode]);
+  const activity = useMemo(() => ({
+    leads: leads.data?.length ?? 0,
+    highValue: leads.data?.filter(lead => lead.score >= 50).length ?? 0,
+    verified: leads.data?.filter(lead => ["verified", "partially_verified"].includes(lead.emailState)).length ?? 0,
+  }), [leads.data]);
+  const filteredLeads = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return leads.data ?? [];
+    return (leads.data ?? []).filter(lead => [lead.businessName, lead.categoryCode, lead.industry, lead.city, lead.region, lead.country, lead.canonicalDomain].filter(Boolean).join(" ").toLowerCase().includes(query));
+  }, [leads.data, searchTerm]);
 
-  // If theme is switchable in App.tsx, we can implement theme toggling like this:
-  // const { theme, toggleTheme } = useTheme();
+  const loadFile = async (file?: File) => {
+    if (!file || file.size > 1_000_000) return;
+    setContent(await file.text());
+    setLabel(file.name.replace(/\.[^.]+$/, ""));
+    setSourceMode("csv");
+  };
+  const runIngestion = () => {
+    const payload = { label, rawContent: content, categoryCode, externalRequestId: newRequestId("operator-intake"), creditAuthorizationId: "mock-credit-authorization" };
+    sourceMode === "csv" ? ingestCsv.mutate(payload) : ingestDomains.mutate(payload);
+  };
+  const toggleLead = (leadId: string) => setSelectedIds(current => current.includes(leadId) ? current.filter(id => id !== leadId) : [...current, leadId]);
+  const isWorking = ingestCsv.isPending || ingestDomains.isPending;
+  const pipelineData = ingestCsv.data ?? ingestDomains.data;
+  const pipelineError = ingestCsv.error ?? ingestDomains.error;
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <main>
-        {/* Example: lucide-react for icons */}
-        <Loader2 className="animate-spin" />
-        Example Page
-        {/* Example: Streamdown for markdown rendering */}
-        <Streamdown>Any **markdown** content</Streamdown>
-        <Button variant="default">Example Button</Button>
-      </main>
-    </div>
-  );
+  if (loading) return <main className="brutalist-shell grid min-h-screen place-items-center"><span className="operator-label">loading operator context</span></main>;
+  if (!isAuthenticated) return <main className="brutalist-shell grid min-h-screen place-items-center px-6 text-center"><section className="max-w-2xl"><p className="operator-label">Gbolix / Leads Engine</p><h1 className="brutalist-display mt-5">INTELLIGENCE<br />WITHOUT THE FOG.</h1><div className="red-rule my-8" /><p className="operator-copy mx-auto max-w-xl">This is an internal operator surface. Gbolix.site remains the customer, identity, credit, billing, request, and delivery system of record.</p><button className="brutalist-button mt-10" onClick={() => window.location.assign("/api/oauth/login")}>ENTER OPERATOR CONSOLE</button></section></main>;
+
+  return <main className="brutalist-shell min-h-screen px-4 py-5 sm:px-7 lg:px-12"><div className="mx-auto max-w-7xl">
+    <header className="flex flex-col gap-5 border-white/25 pb-5 md:flex-row md:items-end md:justify-between md:border-b"><div><p className="operator-label">Gbolix / separate intelligence engine / mock workspace</p><h1 className="brutalist-display mt-2">LEADS<br /><span className="text-red-500">OPERATIONS</span></h1></div><div className="flex items-center gap-4 self-start md:self-auto"><div className="text-right font-mono text-[10px] uppercase tracking-[0.16em] text-white/55"><p>{user?.name ?? "operator"}</p><p>signed operator session</p></div><button className="operator-link" onClick={logout}>exit</button></div></header>
+    <div className="red-rule" />
+    <section className="grid grid-cols-3 border-b border-white/25">{[["ACTIVE LEADS", activity.leads], ["OPPORTUNITY SCORE ≥50", activity.highValue], ["CONTACTS WITH EVIDENCE", activity.verified]].map(([title, value]) => <div key={String(title)} className="border-r border-white/25 px-3 py-5 last:border-r-0 sm:px-6"><p className="operator-label text-white/45">{title}</p><p className="mt-2 font-mono text-3xl font-bold tracking-tighter sm:text-5xl">{value}</p></div>)}</section>
+    <section className="border-b border-white/25 px-3 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-x-6 gap-y-2"><p className="operator-label text-red-400">PIPELINE STATUS REGISTER</p>{jobs.data?.length ? jobs.data.slice(0, 4).map(job => <div key={job.id} className="font-mono text-[10px] uppercase tracking-wide text-white/65"><span className="text-white">{job.status}</span> / {job.operation} / {job.processedCount} OF {job.requestedCount} PROCESSED / {job.qualifiedCount} NEW / {job.duplicateCount} DEDUPED</div>) : <p className="font-mono text-[10px] uppercase tracking-wide text-white/45">No executed jobs in this workspace.</p>}</div></section>
+    <section className="grid border-b border-white/25 lg:grid-cols-[0.82fr_1.18fr]">
+      <div className="border-b border-white/25 p-5 lg:border-b-0 lg:border-r lg:p-7"><p className="operator-label">01 / controlled source intake</p><h2 className="brutalist-section-title mt-2">INGEST<br />WITH RECEIPTS.</h2><p className="operator-copy mt-4">User-provided sources only. Original input is stored as a scoped object, accepted fields start with provenance, and duplicates are suppressed before any mock credit event is emitted.</p><div className="mt-7 flex gap-2"><button className={`mode-button ${sourceMode === "csv" ? "mode-button-active" : ""}`} onClick={() => setSourceMode("csv")}>CSV UPLOAD</button><button className={`mode-button ${sourceMode === "domains" ? "mode-button-active" : ""}`} onClick={() => { setSourceMode("domains"); setContent("northline.example\nharbor.example"); }}>DOMAIN LIST</button></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="field-label">SOURCE LABEL<input value={label} onChange={event => setLabel(event.target.value)} className="brutalist-input" /></label><label className="field-label">BENCHMARK CATEGORY<select value={categoryCode} onChange={event => setCategoryCode(event.target.value)} className="brutalist-input">{(bootstrap.data?.categories ?? []).map(category => <option key={category.code} value={category.code}>{category.label.toUpperCase()}</option>)}</select></label></div><textarea value={content} onChange={event => setContent(event.target.value)} className="brutalist-textarea mt-3" aria-label="Source input" /><input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={event => loadFile(event.target.files?.[0])} /><div className="mt-4 flex flex-wrap gap-3"><button className="operator-link" onClick={() => fileRef.current?.click()}>LOAD CSV FILE</button><button className="brutalist-button" disabled={isWorking || !content.trim() || !label.trim() || !categoryCode} onClick={runIngestion}>{isWorking ? "PROCESSING SOURCE" : "RUN PIPELINE"}</button></div>{pipelineError && <p className="mt-4 border-l-2 border-red-500 pl-3 font-mono text-xs text-red-300">{pipelineError.message}</p>}{pipelineData && <p className="mt-4 border-l-2 border-white pl-3 font-mono text-xs text-white/75">PIPELINE COMPLETE / {pipelineData.createdCount} NEW / {pipelineData.duplicateCount} DUPLICATES SUPPRESSED / CREDIT EVENT EMITTED AFTER DEDUPE</p>}</div>
+      <div className="p-5 lg:p-7"><p className="operator-label">02 / engine boundary</p><h2 className="brutalist-section-title mt-2">SOURCE-AWARE.<br />PROVIDER-NEUTRAL.</h2><div className="mt-6 space-y-0 border-t border-white/25">{(bootstrap.data?.adapters ?? []).map(adapter => <div key={adapter.key} className="flex items-center justify-between border-b border-white/25 py-4 font-mono text-xs uppercase tracking-wide"><span>{adapter.label}</span><span className={adapter.enabled ? "text-lime-300" : "text-red-300"}>{adapter.enabled ? "approved" : "candidate"}</span></div>)}<div className="flex items-center justify-between border-b border-white/25 py-4 font-mono text-xs uppercase tracking-wide"><span>US launch geography</span><span className="text-amber-300">candidate / benchmark pending</span></div><div className="flex items-center justify-between border-b border-white/25 py-4 font-mono text-xs uppercase tracking-wide"><span>Gbolix credit integration</span><span className="text-white/55">signed mock contract</span></div></div><p className="operator-copy mt-6">New sources can only be enabled after coverage, licensing, retention, and cost benchmarks pass. No provider is durable truth by default.</p></div>
+    </section>
+    <section className="border-b border-white/25 py-7"><div className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="operator-label">03 / canonical lead register</p><h2 className="brutalist-section-title mt-2">THE WORKING SET.</h2></div><div className="flex flex-wrap gap-3"><span className="operator-label self-center">{selectedIds.length} selected</span><button disabled={!selectedIds.length || exportSelected.isPending} className="brutalist-button" onClick={() => exportSelected.mutate({ leadIds: selectedIds, externalRequestId: newRequestId("operator-export") })}>{exportSelected.isPending ? "BUILDING EXPORT" : "EXPORT SELECTED"}</button></div></div><div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto]"><label className="field-label">SEARCH CANONICAL LEADS<input value={searchTerm} onChange={event => setSearchTerm(event.target.value)} className="brutalist-input" placeholder="NAME, DOMAIN, CATEGORY, OR LOCATION" /></label><div className="pt-5 font-mono text-xs uppercase text-white/55">{filteredLeads.length} RESULT{filteredLeads.length === 1 ? "" : "S"}</div></div>{exportSelected.data && <button className="operator-link mt-4" disabled={authorizeExport.isPending} onClick={() => authorizeExport.mutate({ exportId: exportSelected.data!.exportId })}>{authorizeExport.isPending ? "AUTHORIZING DOWNLOAD" : `DOWNLOAD EXPIRES ${new Date(exportSelected.data.expiresAt).toLocaleDateString()}`}</button>}{authorizeExport.error && <p className="mt-3 font-mono text-xs text-red-300">{authorizeExport.error.message}</p>}<div className="mt-4 border-y border-white/20 py-3"><p className="operator-label text-white/45">EXPORT STATUS HISTORY</p><div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{exportHistory.data?.length ? exportHistory.data.map(item => <span key={item.id} className="font-mono text-[10px] uppercase text-white/65">{item.status} / {item.leadCount} LEADS / {item.expiresAt ? new Date(item.expiresAt).toLocaleDateString() : "NO EXPIRY"}</span>) : <span className="font-mono text-[10px] uppercase text-white/45">No workspace exports yet.</span>}</div></div><div className="mt-6 overflow-x-auto border-y border-white/25"><table className="w-full min-w-[850px] text-left"><thead className="border-b border-white/25 font-mono text-[10px] tracking-[0.14em] text-white/45"><tr><th className="w-12 p-3">SEL</th><th className="p-3">BUSINESS</th><th className="p-3">CATEGORY</th><th className="p-3">LOCATION</th><th className="p-3">CONTACT</th><th className="p-3">SCORE</th><th className="p-3">VERIFY</th></tr></thead><tbody>{leads.isLoading ? <tr><td colSpan={7} className="p-7 font-mono text-xs text-white/45">LOADING LEAD REGISTER...</td></tr> : filteredLeads.length ? filteredLeads.map(lead => <tr key={lead.id} className={`border-b border-white/15 last:border-0 ${focusedLeadId === lead.id ? "bg-white text-black" : "hover:bg-white/10"}`}><td className="p-3"><input type="checkbox" aria-label={`Select ${lead.businessName}`} checked={selectedIds.includes(lead.id)} onChange={() => toggleLead(lead.id)} /></td><td className="p-3"><button className="text-left font-condensed text-xl font-bold uppercase leading-none" onClick={() => setFocusedLeadId(lead.id)}>{lead.businessName}</button><p className="mt-1 font-mono text-[10px] opacity-60">{lead.canonicalDomain ?? "NO DOMAIN"}</p></td><td className="p-3 font-mono text-xs uppercase">{lead.categoryCode ?? "unclassified"}</td><td className="p-3 font-mono text-xs uppercase">{[lead.city, lead.region, lead.country].filter(Boolean).join(" / ") || "—"}</td><td className="p-3 font-mono text-xs">{lead.publicEmail ?? lead.phone ?? "—"}</td><td className="p-3 font-mono text-2xl font-bold">{lead.score}</td><td className="p-3"><span className="verification-chip">{stateLabel(lead.emailState)}</span></td></tr>) : <tr><td colSpan={7} className="p-8 font-mono text-xs text-white/45">NO MATCHING CANONICAL LEADS. CHANGE THE SEARCH OR LOAD A CONTROLLED SOURCE.</td></tr>}</tbody></table></div></section>
+    <section className="grid lg:grid-cols-[0.82fr_1.18fr]"><div className="border-b border-white/25 p-5 lg:border-b-0 lg:border-r lg:p-7"><p className="operator-label">04 / rules of the engine</p><h2 className="brutalist-section-title mt-2">NO MAGIC.<br />ONLY SIGNALS.</h2><ul className="mt-6 space-y-4 font-mono text-xs leading-relaxed text-white/70"><li><span className="text-red-400">01</span> Duplicate suppression runs before a credit event can be emitted.</li><li><span className="text-red-400">02</span> Each stored field carries provenance and a controlled verification state.</li><li><span className="text-red-400">03</span> AI output is inference—not verification—and cannot overwrite verified facts.</li><li><span className="text-red-400">04</span> Exports are workspace-scoped, auditable, and expire.</li></ul></div><div className="p-5 lg:p-7"><p className="operator-label">05 / lead evidence panel</p>{!focusedLeadId ? <div className="mt-5 border border-dashed border-white/30 p-7"><p className="font-mono text-xs uppercase tracking-[0.12em] text-white/55">Select a lead from the register to inspect provenance, verification, scoring, and AI-inferred intelligence.</p></div> : detail.isLoading ? <p className="mt-5 font-mono text-xs text-white/50">ASSEMBLING EVIDENCE CHAIN...</p> : detail.data ? <EvidencePanel detail={detail.data} onEnrich={() => enrich.mutate({ leadId: detail.data!.lead.id })} onInfer={() => infer.mutate({ leadId: detail.data!.lead.id })} enriching={enrich.isPending} inferring={infer.isPending} error={enrich.error?.message ?? infer.error?.message} /> : null}</div></section>
+  </div></main>;
+}
+
+type LeadDetailView = {
+  lead: { id: string; businessName: string; website: string | null };
+  checks: Array<{ id: string; checkType: string; checkState: string; confidence: number }>;
+  components: Array<{ id: string; points: number; reasonCode: string; explanation: string }>;
+  observations: Array<{ id: string; fieldKey: string; origin: string; verificationState: string; value: string }>;
+};
+
+function EvidencePanel({ detail, onEnrich, onInfer, enriching, inferring, error }: { detail: LeadDetailView; onEnrich: () => void; onInfer: () => void; enriching: boolean; inferring: boolean; error?: string }) {
+  return <div className="mt-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h3 className="font-condensed text-4xl font-bold uppercase leading-none">{detail.lead.businessName}</h3><p className="mt-2 font-mono text-xs text-white/50">{detail.lead.website ?? "NO PUBLIC WEBSITE"}</p></div><div className="flex gap-2"><button className="mode-button" disabled={enriching} onClick={onEnrich}>{enriching ? "FETCHING" : "FETCH EVIDENCE"}</button><button className="mode-button mode-button-active" disabled={inferring} onClick={onInfer}>{inferring ? "INFERRING" : "AI INFER"}</button></div></div>{error && <p className="mt-3 font-mono text-xs text-red-300">{error}</p>}<div className="mt-6 grid gap-5 md:grid-cols-2"><div><p className="operator-label">VERIFICATION LOG</p><div className="mt-3 space-y-2">{detail.checks.length ? detail.checks.map(check => <div key={check.id} className="border-l border-white/40 pl-3 font-mono text-xs"><span className="text-white/45">{check.checkType}</span> / {check.checkState} / {Math.round(check.confidence * 100)}%</div>) : <p className="font-mono text-xs text-white/45">NO CHECKS YET</p>}</div></div><div><p className="operator-label">SCORE REASONS</p><div className="mt-3 space-y-2">{detail.components.map(component => <div key={component.id} className="border-l border-red-500 pl-3 font-mono text-xs"><strong>+{component.points}</strong> {component.reasonCode}<p className="mt-1 text-white/50">{component.explanation}</p></div>)}</div></div></div><div className="mt-6"><p className="operator-label">EVIDENCE + OBSERVATIONS</p><div className="mt-3 space-y-3">{detail.observations.map(observation => <div key={observation.id} className="border border-white/20 p-3 font-mono text-xs"><div className="flex flex-wrap justify-between gap-2"><span>{observation.fieldKey}</span><span className={observation.origin === "ai_inferred" ? "text-amber-300" : "text-lime-300"}>{observation.origin === "ai_inferred" ? "AI-INFERRED / UNVERIFIED" : `${observation.origin} / ${stateLabel(observation.verificationState)}`}</span></div><p className="mt-2 break-words text-white/75">{observation.value}</p></div>)}</div></div></div>;
 }

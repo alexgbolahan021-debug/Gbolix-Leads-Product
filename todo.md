@@ -1,0 +1,27 @@
+# Project TODO
+
+- [x] Define the Gbolix-site mock integration contract for signed server-to-server requests, correlation IDs, idempotency, and external workspace/customer/request references.
+- [x] Model Gbolix-owned credit authorizations, usage finalization, release events, and duplicate-suppression guarantees without storing an independent customer balance.
+- [x] Create a tenant-scoped lead intelligence schema for external workspaces, sources, source policies, jobs, leads, observations, evidence, verification, scoring, exports, and audit events.
+- [x] Add flexible category taxonomy seeded with restaurant and real-estate benchmark categories without hard-coding the engine to those categories.
+- [x] Implement user-provided CSV ingestion with header detection, field mapping, validation feedback, source provenance, and workspace access control.
+- [x] Implement domain-list ingestion with normalization, validation, source provenance, and workspace access control.
+- [x] Define provider-neutral discovery adapter interfaces with source capability and policy metadata, without coupling V1 to a commercial discovery provider.
+- [x] Implement domain, phone, email, business-name, and location normalization services.
+- [x] Implement multi-signal identity resolution using domain, phone, and name-plus-location candidates, with conservative merge rules, merge history, and duplicate suppression.
+- [x] Implement evidence-aware website enrichment that records retrieved page metadata, extraction context, source URLs, timestamps, and field-level evidence references.
+- [x] Implement deterministic verification states for syntax, domain, website relationship, and cross-source checks with confidence scores and conflict handling.
+- [x] Implement versioned lead scoring with component breakdowns and reason codes for restaurant and real-estate opportunity signals.
+- [x] Implement Gemini-compatible structured AI inference for industry, services, website quality signals, and opportunity tags, stored separately from verified observations and visibly labeled as AI-inferred.
+- [x] Implement secure selected-lead CSV exports using object storage references, workspace-scoped access, expiry metadata, and export audit events.
+- [x] Build the internal Brutalist operator dashboard with black canvas, oversized condensed white typography, full-width red divider, centered industrial composition, and accessible interaction states.
+- [x] Build operational views for source ingestion, lead queue/status, search results, lead profiles, provenance, verification states, score explanations, and export status.
+- [x] Add server-side access checks, input validation, URL-fetch protections, rate and size limits, and structured technical audit logging.
+- [x] Add Vitest coverage for normalization, matching, credit-event idempotency, provenance separation, verification states, score explanations, and workspace-scoped exports.
+- [x] Implement cross-source conflict resolution so differing user-provided and website field values are retained, labeled as conflicting, and never silently merged.
+- [x] Add a lead-job status register with queued/running/partial/completed/failed progress metrics to the operator dashboard.
+- [x] Add bounded server-side request rate limits for ingestion/enrichment/export/integration endpoints.
+- [x] Add explicit tests for credit-event idempotency, AI/source provenance separation, and export authorization denial across workspaces.
+- [x] Add a client-side canonical-lead search/results workflow and a workspace-scoped export-history status view.
+- [x] Generate and apply schema migrations, run automated tests and type checks, and verify the dashboard visually at desktop and mobile breakpoints.
+- [ ] Save a completed engine checkpoint and sync the implementation to the user-provided GitHub repository.
