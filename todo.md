@@ -24,4 +24,4 @@
 - [x] Add explicit tests for credit-event idempotency, AI/source provenance separation, and export authorization denial across workspaces.
 - [x] Add a client-side canonical-lead search/results workflow and a workspace-scoped export-history status view.
 - [x] Generate and apply schema migrations, run automated tests and type checks, and verify the dashboard visually at desktop and mobile breakpoints.
-- [ ] Save a completed engine checkpoint and sync the implementation to the user-provided GitHub repository.
+- [x] Save a completed engine checkpoint and sync the implementation to the user-provided GitHub repository.
