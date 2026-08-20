@@ -67,7 +67,7 @@ export async function ensureEngineConfiguration(externalWorkspaceId = OPERATOR_W
     externalWorkspaceId,
     externalCustomerId: externalCustomerId ?? null,
     displayName: externalWorkspaceId === OPERATOR_WORKSPACE_ID ? "Gbolix operator mock workspace" : "Gbolix connected workspace",
-  }).onDuplicateKeyUpdate({ set: { externalCustomerId: externalCustomerId ?? null } });
+  }).onConflictDoUpdate({ target: externalWorkspaces.externalWorkspaceId, set: { externalCustomerId: externalCustomerId ?? null, updatedAt: new Date() } });
   await db.insert(sourceDefinitions).values({
     id: USER_SOURCE_DEFINITION_ID,
     adapterKey: "user-provided-v1",
@@ -77,13 +77,13 @@ export async function ensureEngineConfiguration(externalWorkspaceId = OPERATOR_W
     geographyStatus: "candidate",
     capabilities: { csv: true, domainList: true, evidence: "user-supplied" },
     notes: "V1 controlled source. No external discovery provider is enabled.",
-  }).onDuplicateKeyUpdate({ set: { name: "User-provided CSV and domains", approvalStatus: "approved" } });
+  }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "User-provided CSV and domains", approvalStatus: "approved", updatedAt: new Date() } });
   for (const category of [
     { code: "restaurants", label: "Restaurants", profile: "restaurant-opportunity-v1" },
     { code: "real-estate", label: "Real estate", profile: "real-estate-opportunity-v1" },
   ]) {
-    await db.insert(leadCategoryDefinitions).values({ id: id("cat"), code: category.code, label: category.label, scoringProfile: category.profile }).onDuplicateKeyUpdate({ set: { label: category.label, scoringProfile: category.profile, status: "active" } });
-    await db.insert(scoreVersions).values({ id: `${SCORE_VERSION_ID}-${category.code}`, version: "opportunity-v1", categoryCode: category.code, definition: { category: category.code, deterministic: true, components: ["digital_gap", "contactability", "activity", "data_quality"] } }).onDuplicateKeyUpdate({ set: { definition: { category: category.code, deterministic: true, components: ["digital_gap", "contactability", "activity", "data_quality"] }, status: "active" } });
+    await db.insert(leadCategoryDefinitions).values({ id: id("cat"), code: category.code, label: category.label, scoringProfile: category.profile }).onConflictDoUpdate({ target: leadCategoryDefinitions.code, set: { label: category.label, scoringProfile: category.profile, status: "active" } });
+    await db.insert(scoreVersions).values({ id: `${SCORE_VERSION_ID}-${category.code}`, version: "opportunity-v1", categoryCode: category.code, definition: { category: category.code, deterministic: true, components: ["digital_gap", "contactability", "activity", "data_quality"] } }).onConflictDoUpdate({ target: [scoreVersions.version, scoreVersions.categoryCode], set: { definition: { category: category.code, deterministic: true, components: ["digital_gap", "contactability", "activity", "data_quality"] }, status: "active" } });
   }
 }
 

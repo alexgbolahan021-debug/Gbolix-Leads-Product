@@ -37,7 +37,15 @@
 - [x] Add secured Gbolix control-plane endpoints for Leads request authorization, job/result status, and signed integration events.
 - [x] Replace disabled dashboard product and wallet placeholders with entitlement-aware navigation, wallet balance, billing access, and a Gbolix Leads workspace route.
 - [x] Add tests for workspace isolation, non-expiring balance calculations, credit idempotency, duplicate-safe lead charging, and product entitlement enforcement.
-- [ ] Apply the additive Gbolix Wallet schema to the configured Gbolix database after its TLS connection configuration is resolved, then verify the real cross-product checkout and signed Leads flow.
+- [x] Apply the additive Gbolix Wallet schema to the configured Gbolix database after its TLS connection configuration is resolved.
+- [ ] Configure the signed Gbolix-to-Leads environment variables and verify the real cross-product checkout, workspace entitlement, dispatch, and post-deduplication credit lifecycle.
+- [x] Convert the Gbolix Leads engine schema and database access layer from MySQL/TiDB to a separate Neon PostgreSQL database.
+- [x] Remove the Manus customer OAuth dependency from the deployed Leads engine so Gbolix.site remains the only customer identity system.
+- [x] Verify the converted engine starts without Manus OAuth and document the signed Gbolix-only control-plane access boundary.
+- [x] Add the Neon migration command and Render environment configuration for the converted Leads engine.
+- [ ] Apply the dedicated Neon Leads schema in Render and validate the deployed health path without Manus OAuth initialization.
+- [ ] Commit and synchronize the Neon-converted Gbolix Leads engine to its GitHub repository.
+- [x] Add and validate a controlled Render deployment migration path because manual Render Shell access is unavailable.
 - [x] Commit and synchronize the Gbolix Wallet and Leads integration source implementation to the Gbolix repository.
 - [x] Add a signed Gbolix control-plane request intake and status callback path to the Leads engine, preserving Gbolix as the account, credit, billing, and delivery authority.
 - [x] Correct Leads CSV export generation so every exported selected lead includes its latest versioned total score, score version, and reason codes.
