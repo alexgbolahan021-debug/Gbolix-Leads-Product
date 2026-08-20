@@ -25,3 +25,20 @@
 - [x] Add a client-side canonical-lead search/results workflow and a workspace-scoped export-history status view.
 - [x] Generate and apply schema migrations, run automated tests and type checks, and verify the dashboard visually at desktop and mobile breakpoints.
 - [x] Save a completed engine checkpoint and sync the implementation to the user-provided GitHub repository.
+- [x] Produce a read-only technical implementation report covering the current vertical slice, its mock Gbolix contract, production gaps, and required production integration inputs.
+- [x] Produce a review-only production Gbolix.site-to-Leads integration contract covering identity federation, credits, idempotency, job lifecycle, delivery, failures, secrets, and key rotation.
+- [x] Produce a review-only asynchronous architecture for 50,000-plus lead requests, including worker queues, staging, reliability controls, and scale boundaries.
+- [x] Document the planned CSV export correction that includes each selected lead’s latest versioned score without implementing it yet.
+- [x] Audit the Gbolix product repository and define the account-owned entitlement, dashboard navigation, credit, billing, and API connection path for Gbolix Leads without implementing it yet.
+- [x] Add Gbolix workspace and membership ownership so product access and credits are workspace-bound rather than user-bound.
+- [x] Add the Gbolix product catalog and entitlement model with Gbolix Leads as the first account-entitled product.
+- [x] Add a non-expiring Gbolix Wallet ledger, four approved credit packs, and reserve/finalize/release operations for qualified Leads usage.
+- [x] Add separate Paystack product-credit checkout and payment finalization without changing service-project payment behavior.
+- [x] Add secured Gbolix control-plane endpoints for Leads request authorization, job/result status, and signed integration events.
+- [x] Replace disabled dashboard product and wallet placeholders with entitlement-aware navigation, wallet balance, billing access, and a Gbolix Leads workspace route.
+- [x] Add tests for workspace isolation, non-expiring balance calculations, credit idempotency, duplicate-safe lead charging, and product entitlement enforcement.
+- [ ] Apply the additive Gbolix Wallet schema to the configured Gbolix database after its TLS connection configuration is resolved, then verify the real cross-product checkout and signed Leads flow.
+- [x] Commit and synchronize the Gbolix Wallet and Leads integration source implementation to the Gbolix repository.
+- [x] Add a signed Gbolix control-plane request intake and status callback path to the Leads engine, preserving Gbolix as the account, credit, billing, and delivery authority.
+- [x] Correct Leads CSV export generation so every exported selected lead includes its latest versioned total score, score version, and reason codes.
+- [x] Add automated proof for signed Gbolix control-plane intake rejection, stale-signature rejection, and signed usage-callback payload generation.

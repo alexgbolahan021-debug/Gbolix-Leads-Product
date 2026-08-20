@@ -7,6 +7,7 @@ import { verifyEmailAndWebsite } from "./verification";
 import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
+import { buildGbolixUsageCallback, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
   it("permits a new taxonomy code without changing the input contract", () => {
@@ -92,6 +93,32 @@ describe("signed mock Gbolix integration", () => {
 
   it("derives one stable credit event key for a retried request", () => {
     expect(usageEventIdempotencyKey("gbolix-request-123")).toBe(usageEventIdempotencyKey("gbolix-request-123"));
+  });
+});
+
+describe("signed Gbolix control-plane boundary", () => {
+  it("accepts a current signed request and rejects a modified payload", () => {
+    const secret = "control-plane-test-secret";
+    const timestamp = new Date().toISOString();
+    const payload = { externalRequestId: "grq_12345678", externalWorkspaceId: "gws_1" };
+    const signature = signIntegrationPayload(secret, { timestamp, payload });
+    expect(verifyGbolixInboundSignature(secret, timestamp, signature, payload)).toBe(true);
+    expect(verifyGbolixInboundSignature(secret, timestamp, signature, { ...payload, externalWorkspaceId: "gws_2" })).toBe(false);
+  });
+
+  it("rejects a stale control-plane signature", () => {
+    const secret = "control-plane-test-secret";
+    const timestamp = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+    const payload = { externalRequestId: "grq_12345678" };
+    const signature = signIntegrationPayload(secret, { timestamp, payload });
+    expect(verifyGbolixInboundSignature(secret, timestamp, signature, payload)).toBe(false);
+  });
+
+  it("creates a signed usage callback with measured new-qualified and duplicate counts", () => {
+    const callback = buildGbolixUsageCallback("callback-test-secret", { externalRequestId: "grq_12345678", jobId: "job_123", createdCount: 40, duplicateCount: 10 });
+    expect(callback.body.eventType).toBe("lead_usage_finalized");
+    expect(callback.body.usage).toEqual({ newQualifiedLeads: 40, duplicatesSuppressed: 10 });
+    expect(verifyGbolixInboundSignature("callback-test-secret", callback.timestamp, callback.signature, callback.body)).toBe(true);
   });
 });
 

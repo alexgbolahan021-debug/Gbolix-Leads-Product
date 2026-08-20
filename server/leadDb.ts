@@ -383,8 +383,13 @@ export async function createWorkspaceExport(input: { externalWorkspaceId?: strin
   const workspaceId = input.externalWorkspaceId ?? OPERATOR_WORKSPACE_ID;
   const selectedIds = Array.from(new Set(input.leadIds)).slice(0, 500);
   const leadRows = selectedIds.length ? await db.select().from(leads).where(and(eq(leads.externalWorkspaceId, workspaceId), inArray(leads.id, selectedIds))) : [];
+  const scoredLeadRows = await Promise.all(leadRows.map(async lead => {
+    const [latestScore] = await db.select().from(leadScores).where(eq(leadScores.leadId, lead.id)).orderBy(desc(leadScores.calculatedAt)).limit(1);
+    const components = latestScore ? await db.select().from(leadScoreComponents).where(eq(leadScoreComponents.leadScoreId, latestScore.id)).orderBy(leadScoreComponents.id) : [];
+    return { lead, latestScore, reasonCodes: components.map(component => component.reasonCode).filter(Boolean).join(" | ") };
+  }));
   const exportId = id("export");
-  const csv = ["Business,Category,Website,Email,Phone,Country,Region,City,Score", ...leadRows.map(lead => [lead.businessName, lead.categoryCode ?? "", lead.website ?? "", lead.publicEmail ?? "", lead.phone ?? "", lead.country ?? "", lead.region ?? "", lead.city ?? "", ""].map(value => `"${String(value).replaceAll('"', '""')}"`).join(","))].join("\n");
+  const csv = ["Business,Category,Website,Email,Phone,Country,Region,City,LeadScore,ScoreVersion,ScoreReasonCodes", ...scoredLeadRows.map(({ lead, latestScore, reasonCodes }) => [lead.businessName, lead.categoryCode ?? "", lead.website ?? "", lead.publicEmail ?? "", lead.phone ?? "", lead.country ?? "", lead.region ?? "", lead.city ?? "", latestScore?.totalScore ?? "", latestScore?.scoreVersionId ?? "", reasonCodes].map(value => `"${String(value).replaceAll('"', '""')}"`).join(","))].join("\n");
   const object = await storagePut(`gbolix-leads/${workspaceId}/exports/${exportId}/leads.csv`, csv, "text/csv");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await db.insert(exports).values({ id: exportId, externalWorkspaceId: workspaceId, requestedBy: input.actorId ?? null, format: "csv", status: "ready", selectedLeadIds: leadRows.map(lead => lead.id), leadCount: leadRows.length, objectKey: object.key, storageUrl: object.url, expiresAt });
