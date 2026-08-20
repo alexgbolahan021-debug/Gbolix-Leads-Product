@@ -61,4 +61,7 @@
 - [x] Repair the unresponsive Wallet Buy credits interaction and surface checkout API failures visibly instead of leaving the control apparently inactive.
 - [x] Retry the Gbolix API deployment after Render recovers from its dashboard-level service-unavailable response and verify the latest commit is live.
 - [x] Diagnose and fix the blank Gbolix Wallet page caused by missing React and React Query imports in the deployed Wallet component.
-- [ ] Verify the live Gbolix frontend deploys commit `4474c05` and the authenticated Wallet route renders normally.
+- [x] Verify the live Gbolix frontend deploys commit `4474c05` and the authenticated Wallet route renders normally.
+- [ ] Align Wallet credit-pack currency and Paystack checkout initialization with the merchant account’s supported currency after the live USD rejection.
+- [x] Add the approved database-backed USD-to-NGN rate service with a two-hour freshness window, rounding, fallback, and checkout audit rules before enabling dynamic NGN charges.
+- [ ] Deploy commit `7ff0c72`, apply its additive Wallet schema migration, and verify Paystack receives the converted NGN checkout amount without completing payment.
