@@ -51,3 +51,14 @@
 - [x] Add a signed Gbolix control-plane request intake and status callback path to the Leads engine, preserving Gbolix as the account, credit, billing, and delivery authority.
 - [x] Correct Leads CSV export generation so every exported selected lead includes its latest versioned total score, score version, and reason codes.
 - [x] Add automated proof for signed Gbolix control-plane intake rejection, stale-signature rejection, and signed usage-callback payload generation.
+- [x] Configure the `lead.gbolix.site` custom domain in Render and verify the production health endpoint over the custom domain.
+- [ ] Update the deployed Gbolix API `GBOLIX_LEADS_ENGINE_URL` to `https://lead.gbolix.site` and confirm signed dispatch uses the custom engine domain.
+- [ ] Configure matching `GBOLIX_INTEGRATION_SECRET` and `GBOLIX_LEADS_SHARED_SECRET` values to prevent signed intake requests from crashing the deployed Leads service.
+- [x] Configure the Gbolix API Render health-check path to return a successful response so API deployments do not time out after startup.
+- [x] Add the required timestamp to the Gbolix API `/api/healthz` response, test it, and synchronize the fix for Render deployment.
+- [x] Verify the deployed Leads engine has recovered and rejects invalid signed-intake requests with a safe `401 GBOLIX_SIGNATURE_INVALID` response.
+- [ ] Diagnose and fix the disabled Wallet Pay Now control so an entitled workspace can begin the approved Paystack credit checkout flow.
+- [x] Repair the unresponsive Wallet Buy credits interaction and surface checkout API failures visibly instead of leaving the control apparently inactive.
+- [x] Retry the Gbolix API deployment after Render recovers from its dashboard-level service-unavailable response and verify the latest commit is live.
+- [x] Diagnose and fix the blank Gbolix Wallet page caused by missing React and React Query imports in the deployed Wallet component.
+- [ ] Verify the live Gbolix frontend deploys commit `4474c05` and the authenticated Wallet route renders normally.
