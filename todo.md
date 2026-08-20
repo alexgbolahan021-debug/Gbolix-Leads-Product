@@ -44,6 +44,7 @@
 - [x] Verify the converted engine starts without Manus OAuth and document the signed Gbolix-only control-plane access boundary.
 - [x] Add the Neon migration command and Render environment configuration for the converted Leads engine.
 - [ ] Apply the dedicated Neon Leads schema in Render and validate the deployed health path without Manus OAuth initialization.
+- [x] Provision the separate `gbolix_leads` Neon database and apply the isolated PostgreSQL engine schema without modifying the Gbolix Wallet database.
 - [x] Commit and synchronize the Neon-converted Gbolix Leads engine to its GitHub repository.
 - [x] Add and validate a controlled Render deployment migration path because manual Render Shell access is unavailable.
 - [x] Commit and synchronize the Gbolix Wallet and Leads integration source implementation to the Gbolix repository.
