@@ -62,6 +62,24 @@
 - [x] Retry the Gbolix API deployment after Render recovers from its dashboard-level service-unavailable response and verify the latest commit is live.
 - [x] Diagnose and fix the blank Gbolix Wallet page caused by missing React and React Query imports in the deployed Wallet component.
 - [x] Verify the live Gbolix frontend deploys commit `4474c05` and the authenticated Wallet route renders normally.
-- [ ] Align Wallet credit-pack currency and Paystack checkout initialization with the merchant account’s supported currency after the live USD rejection.
+- [x] Align Wallet credit-pack currency and Paystack checkout initialization with the merchant account’s supported currency after the live USD rejection.
 - [x] Add the approved database-backed USD-to-NGN rate service with a two-hour freshness window, rounding, fallback, and checkout audit rules before enabling dynamic NGN charges.
-- [ ] Deploy commit `7ff0c72`, apply its additive Wallet schema migration, and verify Paystack receives the converted NGN checkout amount without completing payment.
+- [x] Deploy commit `7ff0c72`, apply its additive Wallet schema migration, and verify Paystack receives the converted NGN checkout amount without completing payment.
+- [x] Investigate the reported `clerk.api.gbolix.site` proxy failure: the current Vercel production bundle contains no such hostname, so no Vercel environment-variable change is required.
+- [x] Compare the proven client-product payment return flow with the Wallet callback flow and use the same verified redirect/authentication pattern.
+- [x] Complete an authenticated Wallet test-payment return and confirm callback verification settles credits before navigating to the Wallet.
+- [x] Identify whether the invalid Clerk proxy is supplied by the production deployment, an inherited environment scope, or another Clerk configuration before changing any Vercel setting; the active production bundle has no proxy hostname configured.
+- [x] Trace the original `clerk.api.gbolix.site` DNS failure to the Wallet callback configuration incorrectly pointing the browser to the protected API webhook endpoint.
+- [ ] Run one controlled fresh-browser-session Wallet checkout and record the callback URL chain to confirm no Clerk proxy hostname appears during the Paystack return.
+- [x] Change the Wallet Paystack `callback_url` from the API webhook path to the public Gbolix frontend `/payment/callback` route, while preserving the API webhook for server-to-server `charge.success` events.
+- [x] Diagnose why a successful Wallet test payment reaches `/payment/callback` but remains unconfirmed after the callback retry window, including Paystack transaction state, amount/currency validation, database migration, and settlement logs.
+- [x] Compare Wallet settlement against Paystack’s `requested_amount` rather than customer-charged `amount` when present, so customer-paid fees do not prevent credit settlement.
+- [ ] Document the original Clerk DNS error and the corrected `PAYSTACK_WALLET_CALLBACK_URL` browser-return behavior alongside the verified successful flow.
+- [x] Diagnose the failed live Leads job `grq_f09179b967604bb5b4c076ca99ba48b6`: the engine failed synchronously because its required S3-compatible object storage variables were not configured before source persistence.
+- [x] Configure the S3-compatible `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` values from the isolated Supabase project on the Gbolix Leads Render service before resubmitting a lifecycle test.
+- [x] Confirm the $0 project-creation cost, create the isolated `gbolix-leads-storage` Supabase project in EU West, and create the private `gbolix-leads-private` bucket.
+- [ ] Confirm the failed job’s reserved Wallet credit was released and correct the Leads activity display so a failed request is not also labeled `Processing`.
+- [x] Diagnose stuck Leads job `grq_2649a2b49fe2414681b43a8c173f56ef`: the engine finalized usage synchronously, then the Gbolix dispatch route overwrote its terminal status with `running` after the callback returned.
+- [x] Implement and test the lifecycle guard and dashboard-label repair in Gbolix commit `01b4ecf`, including reconciliation of already-finalized requests on dashboard reads.
+- [ ] Deploy Gbolix commit `01b4ecf` and verify the existing stuck job reconciles to `completed` without a second credit charge.
+- [ ] Add a secure customer-facing results view and CSV download for completed Gbolix Leads jobs, using Gbolix workspace identity and signed server-to-server retrieval from the Leads engine.

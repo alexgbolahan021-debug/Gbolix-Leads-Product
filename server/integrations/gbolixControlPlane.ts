@@ -3,7 +3,7 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { parseDomainList, parseLeadCsv } from "../leads/csv";
 import { getIntegrationSecret } from "../leads/integration";
-import { ingestUserLeads } from "../leadDb";
+import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestUserLeads } from "../leadDb";
 
 const intakeSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
@@ -16,6 +16,16 @@ const intakeSchema = z.object({
   rawContent: z.string().min(1).max(1_000_000),
   categoryCode: z.string().trim().min(1).max(96),
 });
+
+const resultsSchema = z.object({
+  externalRequestId: z.string().trim().min(8).max(128),
+  externalWorkspaceId: z.string().trim().min(1).max(128),
+  actorId: z.string().trim().max(128).optional(),
+});
+
+function verifySignedPayload(req: Request, payload: unknown) {
+  return verifyGbolixInboundSignature(getIntegrationSecret(), req.header("x-gbolix-timestamp"), req.header("x-gbolix-signature"), payload);
+}
 
 export function verifyGbolixInboundSignature(secret: string, timestamp: string | undefined, signature: string | undefined, payload: unknown) {
   if (!timestamp || !signature) return false;
@@ -55,7 +65,7 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
   app.post("/api/integrations/gbolix/leads/ingest", async (req: Request, res: Response) => {
     const payload = intakeSchema.safeParse(req.body);
     if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_REQUEST", details: payload.error.flatten() });
-    if (!verifyGbolixInboundSignature(getIntegrationSecret(), req.header("x-gbolix-timestamp"), req.header("x-gbolix-signature"), payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
+    if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
     try {
       const parsed = payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent) : parseDomainList(payload.data.rawContent);
       const result = await ingestUserLeads({
@@ -77,6 +87,30 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
     } catch (error) {
       console.error("Gbolix control-plane intake failed", error);
       return res.status(500).json({ error: "GBOLIX_INGESTION_FAILED", message: error instanceof Error ? error.message : "Unable to process Gbolix Leads request" });
+    }
+  });
+
+  app.post("/api/integrations/gbolix/leads/results", async (req: Request, res: Response) => {
+    const payload = resultsSchema.safeParse(req.body);
+    if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_RESULTS_REQUEST", details: payload.error.flatten() });
+    if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
+    try {
+      return res.json(await getWorkspaceRequestResults(payload.data));
+    } catch (error) {
+      return res.status(404).json({ error: "GBOLIX_RESULTS_NOT_FOUND", message: error instanceof Error ? error.message : "Unable to retrieve Lead results" });
+    }
+  });
+
+  app.post("/api/integrations/gbolix/leads/exports", async (req: Request, res: Response) => {
+    const payload = resultsSchema.safeParse(req.body);
+    if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_EXPORT_REQUEST", details: payload.error.flatten() });
+    if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
+    try {
+      const exportRecord = await createWorkspaceRequestExport(payload.data);
+      const download = await authorizeWorkspaceExportDownload({ exportId: exportRecord.exportId, externalWorkspaceId: payload.data.externalWorkspaceId, actorId: payload.data.actorId });
+      return res.json({ ...exportRecord, downloadUrl: download.url, downloadExpiresAt: download.expiresAt });
+    } catch (error) {
+      return res.status(404).json({ error: "GBOLIX_EXPORT_NOT_FOUND", message: error instanceof Error ? error.message : "Unable to create Lead export" });
     }
   });
 }

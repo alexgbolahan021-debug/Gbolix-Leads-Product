@@ -29,7 +29,7 @@ import { verifyEmailAndWebsite, verifyEmailDomainExistence } from "./leads/verif
 import { retrieveWebsiteEvidence } from "./leads/website";
 import { inferLeadIntelligence } from "./leads/ai";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceValue, usageEventIdempotencyKey } from "./leads/policy";
-import { storagePut } from "./storage";
+import { storageGetSignedUrl, storagePut } from "./storage";
 
 const USER_SOURCE_DEFINITION_ID = "source-user-provided-v1";
 const SCORE_VERSION_ID = "score-opportunity-v1";
@@ -217,6 +217,61 @@ export async function ingestUserLeads(input: PipelineInput) {
   });
   await db.insert(auditEvents).values({ id: id("audit"), externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: "user_source_ingested", entityType: "lead_job", entityId: jobId, metadata: { sourceId, createdCount, duplicateCount, invalidRows: input.invalid.length } });
   return { jobId, sourceId, createdCount, duplicateCount, invalid: input.invalid, leadIds: createdLeadIds, chargeableCredits: createdCount };
+}
+
+export async function getWorkspaceRequestResults(input: { externalWorkspaceId: string; externalRequestId: string }) {
+  const db = await requireDb();
+  const [job] = await db.select().from(leadJobs).where(and(eq(leadJobs.externalWorkspaceId, input.externalWorkspaceId), eq(leadJobs.externalRequestId, input.externalRequestId))).limit(1);
+  if (!job) throw new Error("The requested Lead job is not available in this workspace.");
+  if (!job.ingestionSourceId) throw new Error("The Lead job does not have a persisted source.");
+
+  const sourceEvidence = await db.select({ leadId: evidenceRecords.leadId }).from(evidenceRecords).where(eq(evidenceRecords.ingestionSourceId, job.ingestionSourceId));
+  const leadIds = Array.from(new Set(sourceEvidence.map(record => record.leadId)));
+  const leadRows = leadIds.length
+    ? await db.select().from(leads).where(and(eq(leads.externalWorkspaceId, input.externalWorkspaceId), eq(leads.lifecycleStatus, "active"), inArray(leads.id, leadIds))).orderBy(desc(leads.createdAt)).limit(50_000)
+    : [];
+  const rows = await Promise.all(leadRows.map(async lead => {
+    const [latestScore] = await db.select().from(leadScores).where(eq(leadScores.leadId, lead.id)).orderBy(desc(leadScores.calculatedAt)).limit(1);
+    return {
+      id: lead.id,
+      businessName: lead.businessName,
+      categoryCode: lead.categoryCode,
+      website: lead.website,
+      publicEmail: lead.publicEmail,
+      phone: lead.phone,
+      country: lead.country,
+      region: lead.region,
+      city: lead.city,
+      dataConfidence: lead.dataConfidence,
+      score: latestScore?.totalScore ?? null,
+      scoreVersion: latestScore?.scoreVersionId ?? null,
+    };
+  }));
+
+  return {
+    job: {
+      id: job.id,
+      status: job.status,
+      requestedCount: job.requestedCount,
+      processedCount: job.processedCount,
+      qualifiedCount: job.qualifiedCount,
+      duplicateCount: job.duplicateCount,
+      completedAt: job.completedAt,
+    },
+    leadIds: rows.map(lead => lead.id),
+    leads: rows,
+  };
+}
+
+export async function createWorkspaceRequestExport(input: { externalWorkspaceId: string; externalRequestId: string; actorId?: string }) {
+  const results = await getWorkspaceRequestResults(input);
+  const exportRecord = await createWorkspaceExport({
+    externalWorkspaceId: input.externalWorkspaceId,
+    externalRequestId: input.externalRequestId,
+    actorId: input.actorId,
+    leadIds: results.leadIds,
+  });
+  return { ...exportRecord, job: results.job };
 }
 
 export async function listOperatorLeads(externalWorkspaceId = OPERATOR_WORKSPACE_ID) {
@@ -408,11 +463,11 @@ export async function authorizeWorkspaceExportDownload(input: { exportId: string
   }
   const expiresAt = exportRecord.expiresAt;
   const decision = exportAccessDecision({ requestedWorkspaceId: workspaceId, exportWorkspaceId: exportRecord.externalWorkspaceId, status: exportRecord.status, expiresAt });
-  if (!decision.allowed || !exportRecord.storageUrl || !expiresAt) {
+  if (!decision.allowed || !exportRecord.objectKey || !expiresAt) {
     await db.update(exports).set({ status: "expired" }).where(eq(exports.id, exportRecord.id));
     await db.insert(exportAuditEvents).values({ id: id("export_audit"), exportId: exportRecord.id, externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: "expired", metadata: { expiresAt: exportRecord.expiresAt?.toISOString() ?? null } });
     throw new Error(decision.reason === "workspace_mismatch" ? "This export is not available in the current workspace." : "This export has expired. Create a new workspace-scoped export to continue.");
   }
   await db.insert(exportAuditEvents).values({ id: id("export_audit"), exportId: exportRecord.id, externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: "downloaded", metadata: { expiresAt: expiresAt.toISOString() } });
-  return { url: exportRecord.storageUrl, expiresAt };
+  return { url: await storageGetSignedUrl(exportRecord.objectKey), expiresAt };
 }
