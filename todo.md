@@ -38,12 +38,12 @@
 - [x] Replace disabled dashboard product and wallet placeholders with entitlement-aware navigation, wallet balance, billing access, and a Gbolix Leads workspace route.
 - [x] Add tests for workspace isolation, non-expiring balance calculations, credit idempotency, duplicate-safe lead charging, and product entitlement enforcement.
 - [x] Apply the additive Gbolix Wallet schema to the configured Gbolix database after its TLS connection configuration is resolved.
-- [ ] Configure the signed Gbolix-to-Leads environment variables and verify the real cross-product checkout, workspace entitlement, dispatch, and post-deduplication credit lifecycle.
+- [ ] Confirm the complete real cross-product credit lifecycle with wallet-ledger evidence for both successful finalization and failed or duplicate-safe release.
 - [x] Convert the Gbolix Leads engine schema and database access layer from MySQL/TiDB to a separate Neon PostgreSQL database.
 - [x] Remove the Manus customer OAuth dependency from the deployed Leads engine so Gbolix.site remains the only customer identity system.
 - [x] Verify the converted engine starts without Manus OAuth and document the signed Gbolix-only control-plane access boundary.
 - [x] Add the Neon migration command and Render environment configuration for the converted Leads engine.
-- [ ] Apply the dedicated Neon Leads schema in Render and validate the deployed health path without Manus OAuth initialization.
+- [x] Apply the dedicated Neon Leads schema in Render and validate the deployed health path without Manus OAuth initialization.
 - [x] Provision the separate `gbolix_leads` Neon database and apply the isolated PostgreSQL engine schema without modifying the Gbolix Wallet database.
 - [x] Commit and synchronize the Neon-converted Gbolix Leads engine to its GitHub repository.
 - [x] Add and validate a controlled Render deployment migration path because manual Render Shell access is unavailable.
@@ -52,12 +52,12 @@
 - [x] Correct Leads CSV export generation so every exported selected lead includes its latest versioned total score, score version, and reason codes.
 - [x] Add automated proof for signed Gbolix control-plane intake rejection, stale-signature rejection, and signed usage-callback payload generation.
 - [x] Configure the `lead.gbolix.site` custom domain in Render and verify the production health endpoint over the custom domain.
-- [ ] Update the deployed Gbolix API `GBOLIX_LEADS_ENGINE_URL` to `https://lead.gbolix.site` and confirm signed dispatch uses the custom engine domain.
-- [ ] Configure matching `GBOLIX_INTEGRATION_SECRET` and `GBOLIX_LEADS_SHARED_SECRET` values to prevent signed intake requests from crashing the deployed Leads service.
+- [x] Update the deployed Gbolix API `GBOLIX_LEADS_ENGINE_URL` to `https://lead.gbolix.site` and confirm signed dispatch uses the custom engine domain.
+- [x] Configure matching `GBOLIX_INTEGRATION_SECRET` and `GBOLIX_LEADS_SHARED_SECRET` values to prevent signed intake requests from crashing the deployed Leads service.
 - [x] Configure the Gbolix API Render health-check path to return a successful response so API deployments do not time out after startup.
 - [x] Add the required timestamp to the Gbolix API `/api/healthz` response, test it, and synchronize the fix for Render deployment.
 - [x] Verify the deployed Leads engine has recovered and rejects invalid signed-intake requests with a safe `401 GBOLIX_SIGNATURE_INVALID` response.
-- [ ] Diagnose and fix the disabled Wallet Pay Now control so an entitled workspace can begin the approved Paystack credit checkout flow.
+- [x] Diagnose and fix the disabled Wallet Pay Now control so an entitled workspace can begin the approved Paystack credit checkout flow.
 - [x] Repair the unresponsive Wallet Buy credits interaction and surface checkout API failures visibly instead of leaving the control apparently inactive.
 - [x] Retry the Gbolix API deployment after Render recovers from its dashboard-level service-unavailable response and verify the latest commit is live.
 - [x] Diagnose and fix the blank Gbolix Wallet page caused by missing React and React Query imports in the deployed Wallet component.
@@ -81,12 +81,13 @@
 - [ ] Confirm the failed job’s reserved Wallet credit was released and correct the Leads activity display so a failed request is not also labeled `Processing`.
 - [x] Diagnose stuck Leads job `grq_2649a2b49fe2414681b43a8c173f56ef`: the engine finalized usage synchronously, then the Gbolix dispatch route overwrote its terminal status with `running` after the callback returned.
 - [x] Implement and test the lifecycle guard and dashboard-label repair in Gbolix commit `01b4ecf`, including reconciliation of already-finalized requests on dashboard reads.
-- [ ] Deploy Gbolix commit `01b4ecf` and verify the existing stuck job reconciles to `completed` without a second credit charge.
+- [ ] Verify the reconciled job from Gbolix commit `01b4ecf` has exactly one Wallet credit finalization and no second charge in the workspace ledger.
 - [x] Implement secure customer-facing results viewing and CSV export requests for completed Gbolix Leads jobs, using Gbolix workspace identity and signed server-to-server retrieval from the Leads engine.
 - [ ] Deploy Leads engine commit `7c9b2bd` and Gbolix commit `a8fdc66`, then verify the completed request shows its lead table and downloads a private, score-inclusive CSV.
-- [ ] Add a compliant provider-neutral discovery mode that generates business candidates from category and city inputs, while retaining domain-list and CSV ingestion as separate user-provided-source modes.
-- [ ] Ensure discovery requests estimate and reserve only their provider-supported candidate ceiling, deduplicate before final credit consumption, and label each lead’s source/provenance clearly.
-- [ ] Compare current free-tier and paid discovery-source options, including usage limits, attribution, storage rights, and the threshold at which Gbolix must use a commercial provider.
+- [x] Add a compliant provider-neutral discovery mode that generates business candidates from category and city inputs, while retaining domain-list and CSV ingestion as separate user-provided-source modes.
+- [x] Ensure discovery requests estimate and reserve only their provider-supported candidate ceiling, deduplicate before final credit consumption, and label each lead’s source/provenance clearly.
+- [x] Compare current free-tier and paid discovery-source options, including usage limits, attribution, storage rights, and the threshold at which Gbolix must use a commercial provider.
 - [x] Compare current free-tier and paid discovery-source options, including usage limits, attribution, storage rights, and the threshold at which Gbolix must use a commercial provider.
 - [x] Implement the approved OpenStreetMap pilot with city-required, user-triggered searches, low request and result caps, visible OpenStreetMap attribution, source provenance, and a provider-neutral adapter boundary.
 - [ ] Deploy the OpenStreetMap pilot on the Leads engine and Gbolix API/dashboard, then validate one city-and-category discovery request without exceeding the 25-result pilot cap.
+- [ ] Confirm the failed storage-misconfiguration request released its reserved Wallet credit and document the live finalize-versus-release evidence.
