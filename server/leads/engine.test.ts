@@ -7,6 +7,7 @@ import { verifyEmailAndWebsite } from "./verification";
 import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
+import { mapOpenStreetMapElement } from "./adapters";
 import { buildGbolixUsageCallback, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
@@ -32,6 +33,16 @@ describe("controlled source parsing", () => {
     expect(parsed.valid).toHaveLength(2);
     expect(parsed.invalid).toHaveLength(1);
     expect(parsed.valid[0]?.businessName).toBe("river.example");
+  });
+});
+
+describe("OpenStreetMap pilot mapping", () => {
+  it("maps public place tags into a lead while retaining category and city context", () => {
+    expect(mapOpenStreetMapElement({ type: "node", id: 42, tags: { name: "River House", website: "https://river.example", "contact:phone": "+1 555 0100", "addr:city": "Chicago", "addr:country": "us" } }, { city: "Chicago", country: "US" }, "restaurants")).toMatchObject({ businessName: "River House", website: "https://river.example", phone: "+1 555 0100", city: "Chicago", country: "US", categoryCode: "restaurants" });
+  });
+
+  it("drops an OpenStreetMap record without a public business name", () => {
+    expect(mapOpenStreetMapElement({ type: "way", id: 99, tags: { website: "https://unnamed.example" } }, { city: "Chicago", country: "US" }, "restaurants")).toBeNull();
   });
 });
 

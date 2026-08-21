@@ -82,4 +82,11 @@
 - [x] Diagnose stuck Leads job `grq_2649a2b49fe2414681b43a8c173f56ef`: the engine finalized usage synchronously, then the Gbolix dispatch route overwrote its terminal status with `running` after the callback returned.
 - [x] Implement and test the lifecycle guard and dashboard-label repair in Gbolix commit `01b4ecf`, including reconciliation of already-finalized requests on dashboard reads.
 - [ ] Deploy Gbolix commit `01b4ecf` and verify the existing stuck job reconciles to `completed` without a second credit charge.
-- [ ] Add a secure customer-facing results view and CSV download for completed Gbolix Leads jobs, using Gbolix workspace identity and signed server-to-server retrieval from the Leads engine.
+- [x] Implement secure customer-facing results viewing and CSV export requests for completed Gbolix Leads jobs, using Gbolix workspace identity and signed server-to-server retrieval from the Leads engine.
+- [ ] Deploy Leads engine commit `7c9b2bd` and Gbolix commit `a8fdc66`, then verify the completed request shows its lead table and downloads a private, score-inclusive CSV.
+- [ ] Add a compliant provider-neutral discovery mode that generates business candidates from category and city inputs, while retaining domain-list and CSV ingestion as separate user-provided-source modes.
+- [ ] Ensure discovery requests estimate and reserve only their provider-supported candidate ceiling, deduplicate before final credit consumption, and label each lead’s source/provenance clearly.
+- [ ] Compare current free-tier and paid discovery-source options, including usage limits, attribution, storage rights, and the threshold at which Gbolix must use a commercial provider.
+- [x] Compare current free-tier and paid discovery-source options, including usage limits, attribution, storage rights, and the threshold at which Gbolix must use a commercial provider.
+- [x] Implement the approved OpenStreetMap pilot with city-required, user-triggered searches, low request and result caps, visible OpenStreetMap attribution, source provenance, and a provider-neutral adapter boundary.
+- [ ] Deploy the OpenStreetMap pilot on the Leads engine and Gbolix API/dashboard, then validate one city-and-category discovery request without exceeding the 25-result pilot cap.

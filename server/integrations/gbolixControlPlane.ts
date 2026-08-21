@@ -2,8 +2,9 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { parseDomainList, parseLeadCsv } from "../leads/csv";
+import { discoveryAdapterRegistry } from "../leads/adapters";
 import { getIntegrationSecret } from "../leads/integration";
-import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestUserLeads } from "../leadDb";
+import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestOpenStreetMapDiscovery, ingestUserLeads } from "../leadDb";
 
 const intakeSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
@@ -12,9 +13,15 @@ const intakeSchema = z.object({
   actorId: z.string().trim().max(128).optional(),
   creditAuthorizationId: z.string().trim().min(6).max(128),
   label: z.string().trim().min(1).max(255),
-  inputType: z.enum(["csv_upload", "domain_list"]),
-  rawContent: z.string().min(1).max(1_000_000),
+  inputType: z.enum(["csv_upload", "domain_list", "openstreetmap_discovery"]),
+  rawContent: z.string().max(1_000_000),
   categoryCode: z.string().trim().min(1).max(96),
+  discovery: z.object({
+    adapterKey: z.literal("openstreetmap-pilot-v1"),
+    city: z.string().trim().min(2).max(128),
+    country: z.string().trim().min(2).max(96).optional(),
+    limit: z.number().int().min(1).max(25),
+  }).optional(),
 });
 
 const resultsSchema = z.object({
@@ -67,21 +74,28 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
     if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_REQUEST", details: payload.error.flatten() });
     if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
     try {
-      const parsed = payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent) : parseDomainList(payload.data.rawContent);
-      const result = await ingestUserLeads({
+      const common = {
         workspaceId: payload.data.externalWorkspaceId,
         customerId: payload.data.externalCustomerId,
         actorId: payload.data.actorId,
         externalRequestId: payload.data.externalRequestId,
         creditAuthorizationId: payload.data.creditAuthorizationId,
         label: payload.data.label,
-        inputType: payload.data.inputType,
-        rawContent: payload.data.rawContent,
-        fieldMapping: payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent).mapping : undefined,
         categoryCode: payload.data.categoryCode,
-        valid: parsed.valid,
-        invalid: parsed.invalid,
-      });
+      };
+      const result = payload.data.inputType === "openstreetmap_discovery"
+        ? await (async () => {
+          if (!payload.data.discovery) throw new Error("OpenStreetMap pilot discovery requires a city, category, and limit.");
+          const adapter = discoveryAdapterRegistry.find(candidate => candidate.key === payload.data.discovery?.adapterKey && candidate.sourcePolicy === "approved");
+          if (!adapter) throw new Error("The requested discovery adapter is not enabled.");
+          const discovered = await adapter.discover({ cities: [payload.data.discovery.city], country: payload.data.discovery.country, categoryCode: payload.data.categoryCode, limit: payload.data.discovery.limit });
+          return ingestOpenStreetMapDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, requestMetadata: { adapterKey: discovered.adapterKey, city: payload.data.discovery.city, country: payload.data.discovery.country ?? null, requestedLimit: payload.data.discovery.limit, attribution: "© OpenStreetMap contributors" } });
+        })()
+        : await (async () => {
+          if (!payload.data.rawContent.trim()) throw new Error("A CSV or domain-list source is required.");
+          const parsed = payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent) : parseDomainList(payload.data.rawContent);
+          return ingestUserLeads({ ...common, inputType: payload.data.inputType, rawContent: payload.data.rawContent, fieldMapping: payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent).mapping : undefined, valid: parsed.valid, invalid: parsed.invalid });
+        })();
       const callback = await emitUsageFinalized({ externalRequestId: payload.data.externalRequestId, jobId: result.jobId, createdCount: result.createdCount, duplicateCount: result.duplicateCount, creditAuthorizationId: payload.data.creditAuthorizationId });
       return res.status(202).json({ accepted: true, jobId: result.jobId, createdCount: result.createdCount, duplicateCount: result.duplicateCount, callback });
     } catch (error) {

@@ -32,6 +32,7 @@ import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, export
 import { storageGetSignedUrl, storagePut } from "./storage";
 
 const USER_SOURCE_DEFINITION_ID = "source-user-provided-v1";
+const OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID = "source-openstreetmap-pilot-v1";
 const SCORE_VERSION_ID = "score-opportunity-v1";
 const OPERATOR_WORKSPACE_ID = "gbolix-operator-mock";
 
@@ -42,12 +43,18 @@ type PipelineInput = {
   externalRequestId: string;
   creditAuthorizationId?: string;
   label: string;
-  inputType: "csv_upload" | "domain_list";
+  inputType: "csv_upload" | "domain_list" | "openstreetmap_discovery";
   rawContent: string;
   fieldMapping?: Record<string, string>;
   categoryCode?: string;
   valid: LeadInput[];
   invalid: Array<{ row: number; message: string }>;
+  sourceDefinitionId?: string;
+  evidenceType?: string;
+  observationOrigin?: string;
+  sourceMetadata?: Record<string, unknown>;
+  provenance?: Array<{ sourceUrl?: string; retrievedAt: string; retentionClass: string }>;
+  operation?: string;
 };
 
 function id(prefix: string) {
@@ -78,6 +85,16 @@ export async function ensureEngineConfiguration(externalWorkspaceId = OPERATOR_W
     capabilities: { csv: true, domainList: true, evidence: "user-supplied" },
     notes: "V1 controlled source. No external discovery provider is enabled.",
   }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "User-provided CSV and domains", approvalStatus: "approved", updatedAt: new Date() } });
+  await db.insert(sourceDefinitions).values({
+    id: OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID,
+    adapterKey: "openstreetmap-pilot-v1",
+    name: "OpenStreetMap pilot discovery",
+    sourceKind: "provider_discovery",
+    approvalStatus: "approved",
+    geographyStatus: "pilot_limited",
+    capabilities: { categoryCityDiscovery: true, maxResultsPerRequest: 25, attribution: "© OpenStreetMap contributors" },
+    notes: "User-triggered, city-required pilot. Public Overpass/Nominatim infrastructure must not be used as the scalable commercial backend.",
+  }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "OpenStreetMap pilot discovery", approvalStatus: "approved", updatedAt: new Date() } });
   for (const category of [
     { code: "restaurants", label: "Restaurants", profile: "restaurant-opportunity-v1" },
     { code: "real-estate", label: "Real estate", profile: "real-estate-opportunity-v1" },
@@ -103,14 +120,16 @@ export async function ingestUserLeads(input: PipelineInput) {
   }
   const jobId = id("job");
   const sourceId = id("src");
-  const rawObject = await storagePut(`gbolix-leads/${workspaceId}/sources/${sourceId}/original-input.txt`, input.rawContent, "text/plain");
+  const sourceDefinitionId = input.sourceDefinitionId ?? USER_SOURCE_DEFINITION_ID;
+  const isDiscovery = input.inputType === "openstreetmap_discovery";
+  const rawObject = await storagePut(`gbolix-leads/${workspaceId}/sources/${sourceId}/original-input.${isDiscovery ? "json" : "txt"}`, input.rawContent, isDiscovery ? "application/json" : "text/plain");
   await db.insert(ingestionSources).values({
     id: sourceId,
     externalWorkspaceId: workspaceId,
-    sourceDefinitionId: USER_SOURCE_DEFINITION_ID,
+    sourceDefinitionId,
     label: input.label,
     inputType: input.inputType,
-    originalFileName: input.inputType === "csv_upload" ? `${input.label}.csv` : `${input.label}.txt`,
+    originalFileName: input.inputType === "csv_upload" ? `${input.label}.csv` : isDiscovery ? `${input.label}.json` : `${input.label}.txt`,
     originalObjectKey: rawObject.key,
     fieldMapping: input.fieldMapping ?? null,
     totalRows: input.valid.length + input.invalid.length,
@@ -124,10 +143,10 @@ export async function ingestUserLeads(input: PipelineInput) {
     externalRequestId: input.externalRequestId,
     creditAuthorizationId: input.creditAuthorizationId ?? null,
     ingestionSourceId: sourceId,
-    operation: "ingest",
+    operation: input.operation ?? "ingest",
     status: "running",
     categoryCode: input.categoryCode ?? null,
-    requestPayload: { source: "user_provided", categoryCode: input.categoryCode ?? null },
+    requestPayload: { source: isDiscovery ? "provider_discovery" : "user_provided", adapterKey: isDiscovery ? "openstreetmap-pilot-v1" : "user-provided-v1", categoryCode: input.categoryCode ?? null, ...(input.sourceMetadata ?? {}) },
     requestedCount: input.valid.length,
     startedAt: new Date(),
   });
@@ -135,7 +154,8 @@ export async function ingestUserLeads(input: PipelineInput) {
   let duplicateCount = 0;
   let createdCount = 0;
   const createdLeadIds: string[] = [];
-  for (const candidate of input.valid) {
+  for (let candidateIndex = 0; candidateIndex < input.valid.length; candidateIndex += 1) {
+    const candidate = input.valid[candidateIndex]!;
     const canonicalDomain = normalizeDomain(candidate.website);
     const canonicalPhone = normalizePhone(candidate.phone);
     const canonicalEmail = normalizeEmail(candidate.email);
@@ -184,10 +204,11 @@ export async function ingestUserLeads(input: PipelineInput) {
       dataConfidence: verification.confidence,
     });
     const evidenceId = id("evidence");
-    await db.insert(evidenceRecords).values({ id: evidenceId, leadId, ingestionSourceId: sourceId, evidenceType: "user_row", sourceLabel: input.label, excerpt: JSON.stringify(candidate).slice(0, 8000), retrievalStatus: "captured", retentionClass: "workspace-controlled", metadata: { rowSource: "user_provided" } });
+    const recordProvenance = input.provenance?.[candidateIndex];
+    await db.insert(evidenceRecords).values({ id: evidenceId, leadId, ingestionSourceId: sourceId, evidenceType: input.evidenceType ?? "user_row", sourceUrl: recordProvenance?.sourceUrl ?? null, sourceLabel: input.label, excerpt: JSON.stringify(candidate).slice(0, 8000), retrievalStatus: "captured", retentionClass: recordProvenance?.retentionClass ?? (isDiscovery ? "openstreetmap-pilot" : "workspace-controlled"), metadata: { rowSource: isDiscovery ? "provider_discovery" : "user_provided", retrievedAt: recordProvenance?.retrievedAt, ...(input.sourceMetadata ?? {}) } });
     for (const [fieldKey, value] of Object.entries(candidate)) {
       if (!value) continue;
-      await db.insert(leadFieldObservations).values({ id: id("obs"), leadId, evidenceId, fieldKey, value, normalizedValue: ["website", "email", "phone"].includes(fieldKey) ? String(value).toLowerCase() : null, origin: "user_provided", verificationState: fieldKey === "email" ? verification.state : "unverified", confidence: fieldKey === "email" ? verification.confidence : 0.55, isCanonical: true });
+      await db.insert(leadFieldObservations).values({ id: id("obs"), leadId, evidenceId, fieldKey, value: String(value), normalizedValue: ["website", "email", "phone"].includes(fieldKey) ? String(value).toLowerCase() : null, origin: input.observationOrigin ?? "user_provided", verificationState: fieldKey === "email" ? verification.state : "unverified", confidence: fieldKey === "email" ? verification.confidence : 0.55, isCanonical: true });
     }
     for (const check of verification.checks) {
       await db.insert(verificationChecks).values({ id: id("check"), leadId, fieldKey: check.fieldKey, checkType: check.checkType, checkState: check.checkState, confidence: check.confidence, details: check.details });
@@ -215,8 +236,21 @@ export async function ingestUserLeads(input: PipelineInput) {
     idempotencyKey: usageEventIdempotencyKey(input.externalRequestId),
     payload: { newQualifiedLeads: createdCount, existingDuplicates: duplicateCount, invalidRows: input.invalid.length, chargeableCredits: createdCount, creditEmissionGuard: "dedupe_complete" },
   });
-  await db.insert(auditEvents).values({ id: id("audit"), externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: "user_source_ingested", entityType: "lead_job", entityId: jobId, metadata: { sourceId, createdCount, duplicateCount, invalidRows: input.invalid.length } });
+  await db.insert(auditEvents).values({ id: id("audit"), externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: isDiscovery ? "provider_discovery_ingested" : "user_source_ingested", entityType: "lead_job", entityId: jobId, metadata: { sourceId, createdCount, duplicateCount, invalidRows: input.invalid.length, adapterKey: isDiscovery ? "openstreetmap-pilot-v1" : "user-provided-v1" } });
   return { jobId, sourceId, createdCount, duplicateCount, invalid: input.invalid, leadIds: createdLeadIds, chargeableCredits: createdCount };
+}
+
+export async function ingestOpenStreetMapDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { requestMetadata: Record<string, unknown> }) {
+  return ingestUserLeads({
+    ...input,
+    inputType: "openstreetmap_discovery",
+    rawContent: JSON.stringify({ adapter: "openstreetmap-pilot-v1", attribution: "© OpenStreetMap contributors", request: input.requestMetadata, records: input.valid }),
+    sourceDefinitionId: OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID,
+    evidenceType: "provider_record",
+    observationOrigin: "provider_discovery",
+    sourceMetadata: { adapterKey: "openstreetmap-pilot-v1", attribution: "© OpenStreetMap contributors", ...input.requestMetadata },
+    operation: "discover",
+  });
 }
 
 export async function getWorkspaceRequestResults(input: { externalWorkspaceId: string; externalRequestId: string }) {
