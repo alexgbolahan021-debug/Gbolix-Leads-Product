@@ -98,3 +98,6 @@
 - [ ] Validate one AI chat proposal and its explicit confirmation-to-job path in production, including the no-reservation clarification path.
 - [x] Add an API or frontend regression test proving confirmation of an AI proposal sends `keywords` in the `/api/leads/requests` POST body.
 - [x] Add a signed control-plane integration test that stubs discovery ingestion and proves intake `keywords` reach the `requestMetadata` passed for persistence.
+- [x] Simulate confirmed proposal-to-discovery locally with a capped OpenStreetMap request, then verify normalized lead results without using production Wallet credits.
+- [x] Exercise a local end-to-end natural-language customer message through proposal generation, explicit confirmation, and capped discovery using a planner test harness with no production Wallet, storage, or database access.
+- [x] Add an automated Gbolix planner test that mocks Gemini transport and proves the customer message reaches structured proposal generation without dispatching a request.
