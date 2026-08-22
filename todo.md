@@ -103,3 +103,4 @@
 - [x] Add an automated Gbolix planner test that mocks Gemini transport and proves the customer message reaches structured proposal generation without dispatching a request.
 - [x] Simulate an incomplete customer prompt locally and prove the planner yields clarification with no confirmable or dispatchable discovery request.
 - [x] Prepare a coordinated release checklist for the Gbolix API, Leads engine, and Vercel frontend; do not ship the frontend alone before its server-side planner dependency is ready.
+- [ ] Run one bounded local real-estate discovery to validate that the second supported OpenStreetMap pilot category can also return real candidates without production credits.

@@ -83,7 +83,7 @@ function categoryQuery(categoryCode: string, lat: number, lon: number) {
     return `nwr["amenity"~"^(restaurant|cafe|fast_food)$"]${around};`;
   }
   if (categoryCode === "real-estate") {
-    return `nwr["office"="estate_agent"]${around};`;
+    return `nwr["office"="estate_agent"]${around};nwr["shop"="estate_agent"]${around};`;
   }
   throw pilotError("this pilot currently supports Restaurants and Real Estate only");
 }

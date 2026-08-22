@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseDomainList, parseLeadCsv } from "./csv";
 import { signIntegrationPayload, verifyIntegrationSignature } from "./integration";
 import { compareLeadIdentity } from "./matching";
@@ -7,7 +7,7 @@ import { verifyEmailAndWebsite } from "./verification";
 import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
-import { mapOpenStreetMapElement } from "./adapters";
+import { mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
 import { buildGbolixUsageCallback, buildOpenStreetMapRequestMetadata, gbolixLeadIntakeSchema, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
@@ -43,6 +43,22 @@ describe("OpenStreetMap pilot mapping", () => {
 
   it("drops an OpenStreetMap record without a public business name", () => {
     expect(mapOpenStreetMapElement({ type: "way", id: 99, tags: { website: "https://unnamed.example" } }, { city: "Chicago", country: "US" }, "restaurants")).toBeNull();
+  });
+
+  it("queries both recognized public estate-agency tag variants within the existing pilot cap", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ lat: "6.5244", lon: "3.3792", address: { country_code: "ng" } }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ elements: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await openStreetMapPilotAdapter.discover({ categoryCode: "real-estate", cities: ["Lagos regression test"], limit: 5 });
+      const overpassBody = String(fetchMock.mock.calls[1]?.[1]?.body);
+      expect(overpassBody).toContain('office%22%3D%22estate_agent');
+      expect(overpassBody).toContain('shop%22%3D%22estate_agent');
+      expect(overpassBody).toContain('out+center+tags+5');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

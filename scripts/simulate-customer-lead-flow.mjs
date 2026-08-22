@@ -6,6 +6,8 @@ import {
 import { openStreetMapPilotAdapter } from "../server/leads/adapters.ts";
 
 const customerMessage = "Find 5 restaurants in Lagos that may need a new website and automation.";
+const runRealEstateSimulation = process.env.SIMULATE_REAL_ESTATE === "1";
+const realEstateSimulationCity = process.env.SIMULATION_REAL_ESTATE_CITY ?? "Lagos";
 
 // The planner's external Gemini transport is mocked locally because deployment and
 // its server-only API key are unavailable. The production planner code is still
@@ -76,6 +78,13 @@ const discovery = await openStreetMapPilotAdapter.discover({
   limit: confirmedRequest.desiredLeadCount,
   keywords: confirmedRequest.keywords,
 });
+const realEstateDiscovery = runRealEstateSimulation
+  ? await openStreetMapPilotAdapter.discover({
+      categoryCode: "real-estate",
+      cities: [realEstateSimulationCity],
+      limit: 5,
+    })
+  : null;
 
 const summary = {
   mode: "local-safe-simulation",
@@ -110,6 +119,22 @@ const summary = {
       provenance: discovery.provenance[index]?.sourceUrl ?? null,
     })),
   },
+  realEstateDiscovery: realEstateDiscovery
+    ? {
+        adapterKey: realEstateDiscovery.adapterKey,
+        city: realEstateSimulationCity,
+        requestedMaximum: 5,
+        returnedRecords: realEstateDiscovery.records.length,
+        leads: realEstateDiscovery.records.map((lead, index) => ({
+          businessName: lead.businessName,
+          category: lead.categoryCode,
+          city: lead.city,
+          website: lead.website ?? null,
+          phone: lead.phone ?? null,
+          provenance: realEstateDiscovery.provenance[index]?.sourceUrl ?? null,
+        })),
+      }
+    : { ran: false, reason: "Opt in with SIMULATE_REAL_ESTATE=1 to avoid unnecessary public-source requests." },
   safeguards: {
     walletTouched: false,
     storageTouched: false,
