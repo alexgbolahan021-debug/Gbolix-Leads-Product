@@ -20,32 +20,47 @@ const mockedPlannerResponse = {
   keywords: ["website", "automation"],
 };
 
-const originalFetch = globalThis.fetch;
-const previousApiKey = process.env.GEMINI_API_KEY;
-process.env.GEMINI_API_KEY = "local-simulation-only";
-
-globalThis.fetch = async (input, init) => {
-  const url = String(input);
-  if (!url.startsWith("https://generativelanguage.googleapis.com/")) {
-    throw new Error(`Unexpected planner request: ${url}`);
+async function planWithMockedTransport(message, response) {
+  const originalFetch = globalThis.fetch;
+  const previousApiKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "local-simulation-only";
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (!url.startsWith("https://generativelanguage.googleapis.com/")) {
+      throw new Error(`Unexpected planner request: ${url}`);
+    }
+    const request = JSON.parse(String(init?.body ?? "{}"));
+    const prompt = request?.contents?.[0]?.parts?.[0]?.text;
+    if (!String(prompt).includes(message)) {
+      throw new Error("The customer message was not supplied to the planner.");
+    }
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: JSON.stringify(response) }] } }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    return await planLeadChatRequest(message);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousApiKey;
   }
-  const request = JSON.parse(String(init?.body ?? "{}"));
-  const prompt = request?.contents?.[0]?.parts?.[0]?.text;
-  if (!String(prompt).includes(customerMessage)) {
-    throw new Error("The customer message was not supplied to the planner.");
-  }
-  return new Response(JSON.stringify({
-    candidates: [{ content: { parts: [{ text: JSON.stringify(mockedPlannerResponse) }] } }],
-  }), { status: 200, headers: { "Content-Type": "application/json" } });
-};
+}
 
-let proposal;
-try {
-  proposal = await planLeadChatRequest(customerMessage);
-} finally {
-  globalThis.fetch = originalFetch;
-  if (previousApiKey === undefined) delete process.env.GEMINI_API_KEY;
-  else process.env.GEMINI_API_KEY = previousApiKey;
+const proposal = await planWithMockedTransport(customerMessage, mockedPlannerResponse);
+const incompleteCustomerMessage = "I need some restaurant leads.";
+const clarificationProposal = await planWithMockedTransport(incompleteCustomerMessage, {
+  kind: "clarify",
+  reply: "Which city and how many restaurant leads would you like?",
+  categoryCode: "restaurants",
+  city: null,
+  desiredLeadCount: null,
+  label: null,
+  keywords: [],
+});
+const clarificationRequest = toConfirmedChatDiscoveryRequest(clarificationProposal);
+if (clarificationRequest !== null) {
+  throw new Error("An incomplete customer prompt incorrectly produced a dispatchable request.");
 }
 
 const confirmedRequest = toConfirmedChatDiscoveryRequest(proposal);
@@ -75,6 +90,12 @@ const summary = {
     required: true,
     confirmed: true,
     requestBody,
+  },
+  clarificationScenario: {
+    customerMessage: incompleteCustomerMessage,
+    proposal: clarificationProposal,
+    confirmableRequest: clarificationRequest,
+    dispatchable: false,
   },
   discovery: {
     adapterKey: discovery.adapterKey,

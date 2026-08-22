@@ -101,3 +101,4 @@
 - [x] Simulate confirmed proposal-to-discovery locally with a capped OpenStreetMap request, then verify normalized lead results without using production Wallet credits.
 - [x] Exercise a local end-to-end natural-language customer message through proposal generation, explicit confirmation, and capped discovery using a planner test harness with no production Wallet, storage, or database access.
 - [x] Add an automated Gbolix planner test that mocks Gemini transport and proves the customer message reaches structured proposal generation without dispatching a request.
+- [x] Simulate an incomplete customer prompt locally and prove the planner yields clarification with no confirmable or dispatchable discovery request.
