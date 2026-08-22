@@ -91,3 +91,10 @@
 - [x] Implement the approved OpenStreetMap pilot with city-required, user-triggered searches, low request and result caps, visible OpenStreetMap attribution, source provenance, and a provider-neutral adapter boundary.
 - [ ] Deploy the OpenStreetMap pilot on the Leads engine and Gbolix API/dashboard, then validate one city-and-category discovery request without exceeding the 25-result pilot cap.
 - [ ] Confirm the failed storage-misconfiguration request released its reserved Wallet credit and document the live finalize-versus-release evidence.
+- [x] Replace the technical customer Leads form with an AI chat that extracts category, location, target count, and optional constraints into a structured, bounded discovery proposal.
+- [x] Require the client to review and confirm the AI-generated job summary and maximum credit reservation before a discovery request is dispatched.
+- [x] Preserve advanced CSV/domain-list intake as a secondary import option rather than the default customer workflow.
+- [ ] Configure a server-only `GEMINI_API_KEY` on the Gbolix API Render service and deploy the conversational planner before a customer uses the new chat workflow.
+- [ ] Validate one AI chat proposal and its explicit confirmation-to-job path in production, including the no-reservation clarification path.
+- [x] Add an API or frontend regression test proving confirmation of an AI proposal sends `keywords` in the `/api/leads/requests` POST body.
+- [x] Add a signed control-plane integration test that stubs discovery ingestion and proves intake `keywords` reach the `requestMetadata` passed for persistence.

@@ -6,7 +6,7 @@ import { discoveryAdapterRegistry } from "../leads/adapters";
 import { getIntegrationSecret } from "../leads/integration";
 import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestOpenStreetMapDiscovery, ingestUserLeads } from "../leadDb";
 
-const intakeSchema = z.object({
+export const gbolixLeadIntakeSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
   externalWorkspaceId: z.string().trim().min(1).max(128),
   externalCustomerId: z.string().trim().max(128).optional(),
@@ -16,6 +16,7 @@ const intakeSchema = z.object({
   inputType: z.enum(["csv_upload", "domain_list", "openstreetmap_discovery"]),
   rawContent: z.string().max(1_000_000),
   categoryCode: z.string().trim().min(1).max(96),
+  keywords: z.array(z.string().trim().min(1).max(80)).max(8).optional().default([]),
   discovery: z.object({
     adapterKey: z.literal("openstreetmap-pilot-v1"),
     city: z.string().trim().min(2).max(128),
@@ -23,6 +24,10 @@ const intakeSchema = z.object({
     limit: z.number().int().min(1).max(25),
   }).optional(),
 });
+
+export function buildOpenStreetMapRequestMetadata(input: { adapterKey: string; city: string; country?: string; keywords: string[]; requestedLimit: number }) {
+  return { adapterKey: input.adapterKey, city: input.city, country: input.country ?? null, keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: "© OpenStreetMap contributors" };
+}
 
 const resultsSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
@@ -70,7 +75,7 @@ async function emitUsageFinalized(payload: { externalRequestId: string; jobId: s
 
 export function registerGbolixControlPlaneRoutes(app: Express) {
   app.post("/api/integrations/gbolix/leads/ingest", async (req: Request, res: Response) => {
-    const payload = intakeSchema.safeParse(req.body);
+    const payload = gbolixLeadIntakeSchema.safeParse(req.body);
     if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_REQUEST", details: payload.error.flatten() });
     if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
     try {
@@ -88,8 +93,8 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
           if (!payload.data.discovery) throw new Error("OpenStreetMap pilot discovery requires a city, category, and limit.");
           const adapter = discoveryAdapterRegistry.find(candidate => candidate.key === payload.data.discovery?.adapterKey && candidate.sourcePolicy === "approved");
           if (!adapter) throw new Error("The requested discovery adapter is not enabled.");
-          const discovered = await adapter.discover({ cities: [payload.data.discovery.city], country: payload.data.discovery.country, categoryCode: payload.data.categoryCode, limit: payload.data.discovery.limit });
-          return ingestOpenStreetMapDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, requestMetadata: { adapterKey: discovered.adapterKey, city: payload.data.discovery.city, country: payload.data.discovery.country ?? null, requestedLimit: payload.data.discovery.limit, attribution: "© OpenStreetMap contributors" } });
+          const discovered = await adapter.discover({ cities: [payload.data.discovery.city], country: payload.data.discovery.country, categoryCode: payload.data.categoryCode, keywords: payload.data.keywords, limit: payload.data.discovery.limit });
+          return ingestOpenStreetMapDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, requestMetadata: buildOpenStreetMapRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, country: payload.data.discovery.country, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
         })()
         : await (async () => {
           if (!payload.data.rawContent.trim()) throw new Error("A CSV or domain-list source is required.");

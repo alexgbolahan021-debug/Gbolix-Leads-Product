@@ -8,7 +8,7 @@ import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
 import { mapOpenStreetMapElement } from "./adapters";
-import { buildGbolixUsageCallback, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
+import { buildGbolixUsageCallback, buildOpenStreetMapRequestMetadata, gbolixLeadIntakeSchema, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
   it("permits a new taxonomy code without changing the input contract", () => {
@@ -130,6 +130,20 @@ describe("signed Gbolix control-plane boundary", () => {
     expect(callback.body.eventType).toBe("lead_usage_finalized");
     expect(callback.body.usage).toEqual({ newQualifiedLeads: 40, duplicatesSuppressed: 10 });
     expect(verifyGbolixInboundSignature("callback-test-secret", callback.timestamp, callback.signature, callback.body)).toBe(true);
+  });
+
+  it("accepts customer constraints in a bounded OpenStreetMap discovery request", () => {
+    const parsed = gbolixLeadIntakeSchema.parse({ externalRequestId: "grq_12345678", externalWorkspaceId: "gws_1", creditAuthorizationId: "auth_123456", label: "Lagos restaurants", inputType: "openstreetmap_discovery", rawContent: "", categoryCode: "restaurants", keywords: ["website", "automation"], discovery: { adapterKey: "openstreetmap-pilot-v1", city: "Lagos, Nigeria", limit: 5 } });
+    expect(parsed.keywords).toEqual(["website", "automation"]);
+    expect(parsed.discovery?.limit).toBe(5);
+  });
+
+  it("rejects discovery requests with more than eight optional constraints", () => {
+    expect(() => gbolixLeadIntakeSchema.parse({ externalRequestId: "grq_12345678", externalWorkspaceId: "gws_1", creditAuthorizationId: "auth_123456", label: "Lagos restaurants", inputType: "openstreetmap_discovery", rawContent: "", categoryCode: "restaurants", keywords: ["a", "b", "c", "d", "e", "f", "g", "h", "i"], discovery: { adapterKey: "openstreetmap-pilot-v1", city: "Lagos, Nigeria", limit: 5 } })).toThrow();
+  });
+
+  it("forwards signed optional constraints into persisted discovery metadata", () => {
+    expect(buildOpenStreetMapRequestMetadata({ adapterKey: "openstreetmap-pilot-v1", city: "Lagos, Nigeria", keywords: ["website", "automation"], requestedLimit: 5 })).toMatchObject({ keywords: ["website", "automation"], requestedLimit: 5, attribution: "© OpenStreetMap contributors" });
   });
 });
 
