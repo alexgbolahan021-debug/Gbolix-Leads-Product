@@ -74,7 +74,7 @@
 - [x] Change the Wallet Paystack `callback_url` from the API webhook path to the public Gbolix frontend `/payment/callback` route, while preserving the API webhook for server-to-server `charge.success` events.
 - [x] Diagnose why a successful Wallet test payment reaches `/payment/callback` but remains unconfirmed after the callback retry window, including Paystack transaction state, amount/currency validation, database migration, and settlement logs.
 - [x] Compare Wallet settlement against Paystack’s `requested_amount` rather than customer-charged `amount` when present, so customer-paid fees do not prevent credit settlement.
-- [ ] Document the original Clerk DNS error and the corrected `PAYSTACK_WALLET_CALLBACK_URL` browser-return behavior alongside the verified successful flow.
+- [x] Document the original Clerk DNS error and the corrected `PAYSTACK_WALLET_CALLBACK_URL` browser-return behavior alongside the verified successful flow.
 - [x] Diagnose the failed live Leads job `grq_f09179b967604bb5b4c076ca99ba48b6`: the engine failed synchronously because its required S3-compatible object storage variables were not configured before source persistence.
 - [x] Configure the S3-compatible `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` values from the isolated Supabase project on the Gbolix Leads Render service before resubmitting a lifecycle test.
 - [x] Confirm the $0 project-creation cost, create the isolated `gbolix-leads-storage` Supabase project in EU West, and create the private `gbolix-leads-private` bucket.
