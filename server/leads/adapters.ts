@@ -28,7 +28,12 @@ const OPENSTREETMAP_PILOT_LIMIT = 25;
 const OPENSTREETMAP_GLOBAL_LIMIT = 100;
 const OPENSTREETMAP_MAX_CITIES_PER_JOB = 10;
 const NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search";
-const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  process.env.LEADS_OVERPASS_ENDPOINT?.trim(),
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+].filter((endpoint, index, all): endpoint is string => Boolean(endpoint) && all.indexOf(endpoint) === index);
 const NOMINATIM_MIN_INTERVAL_MS = 1_100;
 let lastNominatimRequestAt = 0;
 const cityCache = new Map<string, { lat: number; lon: number; countryCode?: string }>();
@@ -134,17 +139,23 @@ export function mapOpenStreetMapElement(element: OpenStreetMapElement, fallback:
 async function discoverOpenStreetMapCity(request: DiscoveryAdapterRequest, city: string, limit: number) {
   const location = await geocodePilotCity(city, request.country);
   const query = `[out:json][timeout:25];(${categoryQuery(request.categoryCode ?? "", location.lat, location.lon)});out center tags ${limit};`;
-  let response: Response;
-  try {
-    response = await fetch(OVERPASS_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Gbolix-Leads-OpenStreetMap/2.0 (support@gbolix.site)" },
-      body: new URLSearchParams({ data: query }).toString(),
-    });
-  } catch (error) {
-    throw pilotError(`candidate lookup could not connect (${error instanceof Error ? error.message : "network error"})`);
+  let response: Response | null = null;
+  let lastFailure = "network error";
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const candidate = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Gbolix-Leads-OpenStreetMap/2.1 (support@gbolix.site)" },
+        body: new URLSearchParams({ data: query }).toString(),
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (candidate.ok) { response = candidate; break; }
+      lastFailure = `HTTP ${candidate.status}`;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : "network error";
+    }
   }
-  if (!response.ok) throw pilotError(`candidate lookup is temporarily unavailable (${response.status})`);
+  if (!response) throw pilotError(`candidate lookup could not connect to an available OSM endpoint (${lastFailure})`);
   const body = await response.json() as { elements?: OpenStreetMapElement[] };
   const retrievedAt = new Date().toISOString();
   const elements = (body.elements ?? []).slice(0, limit);

@@ -60,6 +60,20 @@ describe("OpenStreetMap pilot mapping", () => {
     }
   });
 
+  it("falls back when the primary Overpass endpoint refuses the connection", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ lat: "9.0643305", lon: "7.4892974", address: { country_code: "ng" } }]), { status: 200 }))
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ elements: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await openStreetMapPilotAdapter.discover({ categoryCode: "restaurants", cities: ["Kaduna failover test"], country: "Nigeria", limit: 3 });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("queries both recognized public estate-agency tag variants within the existing pilot cap", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify([{ lat: "6.5244", lon: "3.3792", address: { country_code: "ng" } }]), { status: 200 }))
