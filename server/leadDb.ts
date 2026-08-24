@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
   auditEvents,
@@ -158,7 +158,7 @@ export async function ingestUserLeads(input: PipelineInput) {
     operation: input.operation ?? "ingest",
     status: "running",
     categoryCode: input.categoryCode ?? null,
-    requestPayload: { source: isDiscovery ? "provider_discovery" : "user_provided", adapterKey: isDiscovery ? "openstreetmap-pilot-v1" : "user-provided-v1", categoryCode: input.categoryCode ?? null, ...(input.sourceMetadata ?? {}) },
+    requestPayload: { source: isDiscovery ? "provider_discovery" : "user_provided", adapterKey: isDiscovery ? String(input.sourceMetadata?.adapterKey ?? "openstreetmap-pilot-v1") : "user-provided-v1", categoryCode: input.categoryCode ?? null, ...(input.sourceMetadata ?? {}) },
     requestedCount: input.valid.length,
     startedAt: new Date(),
   });
@@ -238,8 +238,9 @@ export async function ingestUserLeads(input: PipelineInput) {
 
   // A credit event is created only after every record has passed duplicate suppression.
   await db.update(leadJobs).set({ status: input.invalid.length ? "partially_complete" : "completed", processedCount: input.valid.length, duplicateCount, qualifiedCount: createdCount, chargeableCredits: createdCount, completedAt: new Date() }).where(eq(leadJobs.id, jobId));
+  const integrationEventId = id("event");
   await db.insert(integrationEvents).values({
-    id: id("event"),
+    id: integrationEventId,
     externalWorkspaceId: workspaceId,
     externalRequestId: input.externalRequestId,
     leadJobId: jobId,
@@ -248,8 +249,8 @@ export async function ingestUserLeads(input: PipelineInput) {
     idempotencyKey: usageEventIdempotencyKey(input.externalRequestId),
     payload: { newQualifiedLeads: createdCount, existingDuplicates: duplicateCount, invalidRows: input.invalid.length, chargeableCredits: createdCount, creditEmissionGuard: "dedupe_complete" },
   });
-  await db.insert(auditEvents).values({ id: id("audit"), externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: isDiscovery ? "provider_discovery_ingested" : "user_source_ingested", entityType: "lead_job", entityId: jobId, metadata: { sourceId, createdCount, duplicateCount, invalidRows: input.invalid.length, adapterKey: isDiscovery ? "openstreetmap-pilot-v1" : "user-provided-v1" } });
-  return { jobId, sourceId, createdCount, duplicateCount, invalid: input.invalid, leadIds: createdLeadIds, chargeableCredits: createdCount };
+  await db.insert(auditEvents).values({ id: id("audit"), externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: isDiscovery ? "provider_discovery_ingested" : "user_source_ingested", entityType: "lead_job", entityId: jobId, metadata: { sourceId, createdCount, duplicateCount, invalidRows: input.invalid.length, adapterKey: isDiscovery ? String(input.sourceMetadata?.adapterKey ?? "openstreetmap-pilot-v1") : "user-provided-v1" } });
+  return { jobId, sourceId, integrationEventId, createdCount, duplicateCount, invalid: input.invalid, leadIds: createdLeadIds, chargeableCredits: createdCount };
 }
 
 export async function ingestProviderDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { adapterKey: string; requestMetadata: Record<string, unknown> }) {
@@ -257,17 +258,32 @@ export async function ingestProviderDiscovery(input: Omit<PipelineInput, "inputT
   return ingestUserLeads({
     ...input,
     inputType: "openstreetmap_discovery",
-    rawContent: JSON.stringify({ adapter: input.adapterKey, attribution: isGooglePlaces ? "Google Maps" : "© OpenStreetMap contributors", request: input.requestMetadata, records: input.valid }),
+    rawContent: JSON.stringify({ adapter: input.adapterKey, attribution: isGooglePlaces ? "Google Places API" : "© OpenStreetMap contributors", request: input.requestMetadata, records: input.valid }),
     sourceDefinitionId: isGooglePlaces ? GOOGLE_PLACES_SOURCE_DEFINITION_ID : OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID,
     evidenceType: "provider_record",
     observationOrigin: "provider_discovery",
-    sourceMetadata: { adapterKey: input.adapterKey, attribution: isGooglePlaces ? "Google Maps" : "© OpenStreetMap contributors", ...input.requestMetadata },
+    sourceMetadata: { adapterKey: input.adapterKey, attribution: isGooglePlaces ? "Google Places API" : "© OpenStreetMap contributors", ...input.requestMetadata },
     operation: "discover",
   });
 }
 
 export async function ingestOpenStreetMapDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { requestMetadata: Record<string, unknown> }) {
   return ingestProviderDiscovery({ ...input, adapterKey: "openstreetmap-pilot-v1" });
+}
+
+export async function listPendingIntegrationEvents(limit = 20) {
+  const db = await requireDb();
+  return db.select().from(integrationEvents).where(eq(integrationEvents.deliveryState, "pending")).orderBy(asc(integrationEvents.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+}
+
+export async function markIntegrationEventDelivery(input: { eventId: string; state: "pending" | "delivered" | "failed"; errorCode?: string }) {
+  const db = await requireDb();
+  const [event] = await db.select().from(integrationEvents).where(eq(integrationEvents.id, input.eventId)).limit(1);
+  if (!event) return null;
+  const previousPayload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+  const attempts = Number(previousPayload.deliveryAttempts ?? 0) + 1;
+  await db.update(integrationEvents).set({ deliveryState: input.state, payload: { ...previousPayload, deliveryAttempts: attempts, lastDeliveryErrorCode: input.errorCode ?? null, lastDeliveryAttemptAt: new Date().toISOString() } }).where(eq(integrationEvents.id, input.eventId));
+  return { ...event, deliveryAttempts: attempts };
 }
 
 export async function getWorkspaceRequestResults(input: { externalWorkspaceId: string; externalRequestId: string }) {

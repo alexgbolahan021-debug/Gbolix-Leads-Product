@@ -7,7 +7,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { registerGbolixControlPlaneRoutes } from "../integrations/gbolixControlPlane";
+import { reconcilePendingUsageEvents, registerGbolixControlPlaneRoutes } from "../integrations/gbolixControlPlane";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -61,6 +61,11 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    const reconciliationInterval = setInterval(() => {
+      void reconcilePendingUsageEvents().catch(error => console.error("Leads callback reconciliation failed", { code: "CALLBACK_RECONCILIATION_FAILED", error: error instanceof Error ? error.message : "unknown_error" }));
+    }, 30_000);
+    reconciliationInterval.unref();
+    void reconcilePendingUsageEvents().catch(error => console.error("Leads callback reconciliation failed", { code: "CALLBACK_RECONCILIATION_FAILED", error: error instanceof Error ? error.message : "unknown_error" }));
   });
 }
 

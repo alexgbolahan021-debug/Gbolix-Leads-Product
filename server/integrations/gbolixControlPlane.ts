@@ -4,7 +4,7 @@ import { z } from "zod";
 import { parseDomainList, parseLeadCsv } from "../leads/csv";
 import { discoveryAdapterRegistry } from "../leads/adapters";
 import { getIntegrationSecret } from "../leads/integration";
-import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestProviderDiscovery, ingestUserLeads } from "../leadDb";
+import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestProviderDiscovery, ingestUserLeads, listPendingIntegrationEvents, markIntegrationEventDelivery } from "../leadDb";
 
 export const gbolixLeadIntakeSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
@@ -65,14 +65,71 @@ export function buildGbolixUsageCallback(secret: string, payload: { externalRequ
   return { timestamp, body, signature };
 }
 
-async function emitUsageFinalized(payload: { externalRequestId: string; jobId: string; createdCount: number; duplicateCount: number; creditAuthorizationId: string }) {
+function safeCallbackTarget(callbackUrl: string | undefined) {
+  if (!callbackUrl) return "not-configured";
+  try { return new URL(callbackUrl).host || "invalid-host"; } catch { return "invalid-url"; }
+}
+
+async function deliverUsageEvent(event: { id: string; externalRequestId: string; leadJobId: string | null; creditAuthorizationId: string | null; payload: unknown }) {
   const callbackUrl = process.env.GBOLIX_CONTROL_PLANE_CALLBACK_URL;
   const callbackSecret = process.env.GBOLIX_CONTROL_PLANE_CALLBACK_SECRET;
-  if (!callbackUrl || !callbackSecret) return { delivered: false, reason: "callback_not_configured" as const };
-  const { timestamp, body, signature } = buildGbolixUsageCallback(callbackSecret, payload);
-  const response = await fetch(callbackUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Gbolix-Timestamp": timestamp, "X-Gbolix-Signature": signature }, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error(`Gbolix callback returned ${response.status}`);
-  return { delivered: true as const };
+  if (!callbackUrl || !callbackSecret) {
+    await markIntegrationEventDelivery({ eventId: event.id, state: "pending", errorCode: "CALLBACK_NOT_CONFIGURED" });
+    return { delivered: false, reason: "callback_not_configured" as const };
+  }
+  if (!event.leadJobId) {
+    await markIntegrationEventDelivery({ eventId: event.id, state: "failed", errorCode: "CALLBACK_JOB_ID_MISSING" });
+    return { delivered: false, reason: "job_id_missing" as const };
+  }
+  const eventPayload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+  const createdCount = Number(eventPayload.newQualifiedLeads ?? eventPayload.chargeableCredits ?? 0);
+  const duplicateCount = Number(eventPayload.existingDuplicates ?? 0);
+  try {
+    const { timestamp, body, signature } = buildGbolixUsageCallback(process.env.GBOLIX_CONTROL_PLANE_CALLBACK_SECRET!, { externalRequestId: event.externalRequestId, jobId: event.leadJobId, createdCount, duplicateCount });
+    const response = await fetch(callbackUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Gbolix-Timestamp": timestamp, "X-Gbolix-Signature": signature }, body: JSON.stringify(body) });
+    if (!response.ok) {
+      const errorCode = `CALLBACK_HTTP_${response.status}`;
+      await markIntegrationEventDelivery({ eventId: event.id, state: "pending", errorCode });
+      console.error("Gbolix control-plane callback rejected", { errorCode, target: safeCallbackTarget(callbackUrl), externalRequestId: event.externalRequestId });
+      return { delivered: false, reason: errorCode } as const;
+    }
+    await markIntegrationEventDelivery({ eventId: event.id, state: "delivered" });
+    return { delivered: true as const };
+  } catch {
+    await markIntegrationEventDelivery({ eventId: event.id, state: "pending", errorCode: "CALLBACK_FETCH_FAILED" });
+    console.error("Gbolix control-plane callback delivery failed", { errorCode: "CALLBACK_FETCH_FAILED", target: safeCallbackTarget(callbackUrl), externalRequestId: event.externalRequestId });
+    return { delivered: false, reason: "callback_fetch_failed" as const };
+  }
+}
+
+async function emitUsageFinalized(eventId: string) {
+  const event = (await listPendingIntegrationEvents(100)).find(candidate => candidate.id === eventId);
+  if (!event) return { delivered: false, reason: "callback_event_not_found" as const };
+  return deliverUsageEvent(event);
+}
+
+export async function reconcilePendingUsageEvents() {
+  if (!process.env.GBOLIX_CONTROL_PLANE_CALLBACK_URL || !process.env.GBOLIX_CONTROL_PLANE_CALLBACK_SECRET) return { attempted: 0, skipped: 0, failed: 0 };
+  const events = await listPendingIntegrationEvents(20);
+  let attempted = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const event of events) {
+    const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+    const attempts = Number(payload.deliveryAttempts ?? 0);
+    const lastAttemptAt = typeof payload.lastDeliveryAttemptAt === "string" ? Date.parse(payload.lastDeliveryAttemptAt) : NaN;
+    const retryDelay = Math.min(15 * 60 * 1000, 30 * 1000 * (2 ** Math.min(attempts, 5)));
+    if (attempts >= 12) {
+      await markIntegrationEventDelivery({ eventId: event.id, state: "failed", errorCode: "CALLBACK_RETRY_EXHAUSTED" });
+      failed += 1;
+      continue;
+    }
+    if (Number.isFinite(lastAttemptAt) && Date.now() - lastAttemptAt < retryDelay) { skipped += 1; continue; }
+    attempted += 1;
+    const result = await deliverUsageEvent(event);
+    if (!result.delivered) failed += 1;
+  }
+  return { attempted, skipped, failed };
 }
 
 export function registerGbolixControlPlaneRoutes(app: Express) {
@@ -104,10 +161,10 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
           const parsed = payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent) : parseDomainList(payload.data.rawContent);
           return ingestUserLeads({ ...common, inputType: payload.data.inputType, rawContent: payload.data.rawContent, fieldMapping: payload.data.inputType === "csv_upload" ? parseLeadCsv(payload.data.rawContent).mapping : undefined, valid: parsed.valid, invalid: parsed.invalid });
         })();
-      const callback = await emitUsageFinalized({ externalRequestId: payload.data.externalRequestId, jobId: result.jobId, createdCount: result.createdCount, duplicateCount: result.duplicateCount, creditAuthorizationId: payload.data.creditAuthorizationId });
+      const callback = result.integrationEventId ? await emitUsageFinalized(result.integrationEventId) : { delivered: false, reason: "callback_event_not_found" as const };
       return res.status(202).json({ accepted: true, jobId: result.jobId, createdCount: result.createdCount, duplicateCount: result.duplicateCount, callback });
     } catch (error) {
-      console.error("Gbolix control-plane intake failed", error);
+      console.error("Gbolix control-plane intake failed", { code: "GBOLIX_INGESTION_FAILED", error: error instanceof Error ? error.message : "unknown_error" });
       return res.status(500).json({ error: "GBOLIX_INGESTION_FAILED", message: error instanceof Error ? error.message : "Unable to process Gbolix Leads request" });
     }
   });
