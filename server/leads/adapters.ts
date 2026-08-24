@@ -63,22 +63,37 @@ async function geocodePilotCity(city: string, country?: string) {
   if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
   lastNominatimRequestAt = Date.now();
 
-  const query = [city, country].filter(Boolean).join(", ");
-  const url = new URL(NOMINATIM_ENDPOINT);
-  url.searchParams.set("q", query);
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("addressdetails", "1");
-  const response = await fetch(url, { headers: { "User-Agent": "Gbolix-Leads-OpenStreetMap-Pilot/1.0 (support@gbolix.site)", Accept: "application/json" } });
-  if (!response.ok) throw pilotError(`city lookup is temporarily unavailable (${response.status})`);
-  const matches = await response.json() as Array<{ lat?: string; lon?: string; address?: { country_code?: string } }>;
-  const match = matches[0];
-  const lat = Number(match?.lat);
-  const lon = Number(match?.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw pilotError("city was not found; enter a specific city and country if needed");
-  const result = { lat, lon, countryCode: safeText(match?.address?.country_code)?.toUpperCase() };
-  cityCache.set(cacheKey, result);
-  return result;
+  const headers = { "User-Agent": "Gbolix-Leads-OpenStreetMap-Pilot/1.1 (support@gbolix.site)", Accept: "application/json" };
+  const cityParts = city.split(",").map(part => part.trim()).filter(Boolean);
+  const queries = [
+    { city: cityParts[0] ?? city, country: (country ?? cityParts.slice(1).join(", ")) || undefined },
+    { q: [city, country].filter(Boolean).join(", ") },
+  ];
+  for (const parameters of queries) {
+    const url = new URL(NOMINATIM_ENDPOINT);
+    if (parameters.q) url.searchParams.set("q", parameters.q);
+    else {
+      if (!parameters.city) continue;
+      url.searchParams.set("city", parameters.city);
+      if (parameters.country) url.searchParams.set("country", parameters.country);
+    }
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("limit", "1");
+    url.searchParams.set("addressdetails", "1");
+    const response = await fetch(url, { headers });
+    if (!response.ok) throw pilotError(`city lookup is temporarily unavailable (${response.status})`);
+    const body: unknown = await response.json().catch(() => null);
+    const matches = Array.isArray(body) ? body as Array<{ lat?: string; lon?: string; address?: { country_code?: string } }> : [];
+    const match = matches[0];
+    const lat = Number(match?.lat);
+    const lon = Number(match?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      const result = { lat, lon, countryCode: safeText(match?.address?.country_code)?.toUpperCase() };
+      cityCache.set(cacheKey, result);
+      return result;
+    }
+  }
+  throw pilotError(`city "${city}" was not found; enter a specific city and country if needed`);
 }
 
 function categoryQuery(categoryCode: string, lat: number, lon: number) {

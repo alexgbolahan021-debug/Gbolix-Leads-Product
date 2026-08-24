@@ -45,6 +45,21 @@ describe("OpenStreetMap pilot mapping", () => {
     expect(mapOpenStreetMapElement({ type: "way", id: 99, tags: { website: "https://unnamed.example" } }, { city: "Chicago", country: "US" }, "restaurants")).toBeNull();
   });
 
+  it("resolves a city-only request through structured city lookup", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ lat: "9.0643305", lon: "7.4892974", address: { country_code: "ng" } }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ elements: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await openStreetMapPilotAdapter.discover({ categoryCode: "restaurants", cities: ["Abuja"], country: "Nigeria", limit: 3 });
+      const geocoderUrl = String(fetchMock.mock.calls[0]?.[0]);
+      expect(geocoderUrl).toContain("city=Abuja");
+      expect(geocoderUrl).toContain("country=Nigeria");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("queries both recognized public estate-agency tag variants within the existing pilot cap", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify([{ lat: "6.5244", lon: "3.3792", address: { country_code: "ng" } }]), { status: 200 }))
