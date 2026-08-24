@@ -1,8 +1,8 @@
-import { planLeadChatRequest } from "../../Gbolix-api-current/artifacts/api-server/src/lib/leadsAiPlanner.ts";
+import { planLeadChatRequest } from "../../Gbolix/artifacts/api-server/src/lib/leadsAiPlanner.ts";
 import {
   toConfirmedChatDiscoveryRequest,
   toLeadRequestBody,
-} from "../../Gbolix-api-current/artifacts/gbolix/src/lib/leadChatProposal.ts";
+} from "../../Gbolix/artifacts/gbolix/src/lib/leadChatProposal.ts";
 import { openStreetMapPilotAdapter } from "../server/leads/adapters.ts";
 
 const customerMessage = "Find 5 restaurants in Lagos that may need a new website and automation.";
@@ -78,13 +78,19 @@ const discovery = await openStreetMapPilotAdapter.discover({
   limit: confirmedRequest.desiredLeadCount,
   keywords: confirmedRequest.keywords,
 });
-const realEstateDiscovery = runRealEstateSimulation
-  ? await openStreetMapPilotAdapter.discover({
+let realEstateDiscovery = null;
+let realEstateError = null;
+if (runRealEstateSimulation) {
+  try {
+    realEstateDiscovery = await openStreetMapPilotAdapter.discover({
       categoryCode: "real-estate",
       cities: [realEstateSimulationCity],
       limit: 5,
-    })
-  : null;
+    });
+  } catch (error) {
+    realEstateError = error instanceof Error ? error.message : String(error);
+  }
+}
 
 const summary = {
   mode: "local-safe-simulation",
@@ -134,7 +140,9 @@ const summary = {
           provenance: realEstateDiscovery.provenance[index]?.sourceUrl ?? null,
         })),
       }
-    : { ran: false, reason: "Opt in with SIMULATE_REAL_ESTATE=1 to avoid unnecessary public-source requests." },
+    : runRealEstateSimulation
+      ? { ran: true, available: false, city: realEstateSimulationCity, error: realEstateError }
+      : { ran: false, reason: "Opt in with SIMULATE_REAL_ESTATE=1 to avoid unnecessary public-source requests." },
   safeguards: {
     walletTouched: false,
     storageTouched: false,
