@@ -153,6 +153,15 @@ async function discoverOpenStreetMapCity(request: DiscoveryAdapterRequest, city:
       lastFailure = `HTTP ${candidate.status}`;
     } catch (error) {
       lastFailure = error instanceof Error ? error.message : "network error";
+      try {
+        const getUrl = new URL(endpoint);
+        getUrl.searchParams.set("data", query);
+        const candidate = await fetch(getUrl, { headers: { "User-Agent": "Gbolix-Leads-OpenStreetMap/2.1 (support@gbolix.site)", Accept: "application/json" }, signal: AbortSignal.timeout(25_000) });
+        if (candidate.ok) { response = candidate; break; }
+        lastFailure = `HTTP ${candidate.status}`;
+      } catch (fallbackError) {
+        lastFailure = fallbackError instanceof Error ? fallbackError.message : lastFailure;
+      }
     }
   }
   if (!response) throw pilotError(`candidate lookup could not connect to an available OSM endpoint (${lastFailure})`);
