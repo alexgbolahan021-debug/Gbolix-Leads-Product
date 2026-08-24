@@ -1,4 +1,5 @@
 import type { LeadInput } from "@shared/leadContracts";
+import { getDiscoverySourceCredential } from "./sourceCredentials";
 
 export type DiscoveryAdapterRequest = {
   country?: string;
@@ -151,8 +152,9 @@ function countryCode(value?: string) {
 }
 
 async function discoverGooglePlacesCity(request: DiscoveryAdapterRequest, city: string, limit: number) {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY?.trim();
-  if (!apiKey) throw new Error("Google Places source is not configured. Add GOOGLE_PLACES_API_KEY on the Leads engine.");
+  const source = await getDiscoverySourceCredential("google-places-v1");
+  const apiKey = source?.apiKey;
+  if (!apiKey) throw new Error("Google Places source is not approved or configured in the Leads admin portal.");
   const records: LeadInput[] = [];
   const provenance: Array<{ sourceUrl?: string; retrievedAt: string; retentionClass: string }> = [];
   let pageToken: string | undefined;
@@ -208,7 +210,7 @@ export const openStreetMapPilotAdapter: DiscoveryAdapter = {
 export const googlePlacesAdapter: DiscoveryAdapter = {
   key: "google-places-v1",
   label: "Google Places API (official; policy-gated)",
-  get sourcePolicy() { return process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" ? "approved" : "candidate"; },
+  sourcePolicy: "approved",
   async discover(request) {
     const cities = Array.from(new Set((request.cities ?? []).map(city => city.trim()).filter(Boolean)));
     if (!cities.length) throw new Error("Google Places discovery requires at least one city.");
@@ -233,7 +235,7 @@ export const discoveryAdapterRegistry: DiscoveryAdapter[] = [openStreetMapPilotA
 export function getAdapterCatalog() {
   return [
     { key: "user-provided-v1", label: "User-provided CSV and domains", sourcePolicy: "approved", enabled: true, geography: "worldwide", costClass: "customer_owned" },
-    ...discoveryAdapterRegistry.map(adapter => ({ key: adapter.key, label: adapter.label, sourcePolicy: adapter.sourcePolicy, enabled: adapter.sourcePolicy === "approved", geography: "multi-country", costClass: adapter.key === "google-places-v1" ? "paid_provider" : "public_provider", maxCitiesPerJob: OPENSTREETMAP_MAX_CITIES_PER_JOB, maxResultsPerJob: OPENSTREETMAP_GLOBAL_LIMIT, requiresApproval: adapter.key === "google-places-v1", configured: adapter.key !== "google-places-v1" || Boolean(process.env.GOOGLE_PLACES_API_KEY) })),
+    ...discoveryAdapterRegistry.map(adapter => { const googlePolicy = adapter.key === "google-places-v1" && process.env.GOOGLE_PLACES_SOURCE_APPROVED !== "true" ? "candidate" : adapter.sourcePolicy; return { key: adapter.key, label: adapter.label, sourcePolicy: googlePolicy, enabled: googlePolicy === "approved", geography: "multi-country", costClass: adapter.key === "google-places-v1" ? "paid_provider" : "public_provider", maxCitiesPerJob: OPENSTREETMAP_MAX_CITIES_PER_JOB, maxResultsPerJob: OPENSTREETMAP_GLOBAL_LIMIT, requiresApproval: adapter.key === "google-places-v1", configured: adapter.key !== "google-places-v1" || Boolean(process.env.GOOGLE_PLACES_API_KEY) }; }),
     { key: "licensed-directory-v1", label: "Licensed business directory (optional)", sourcePolicy: "candidate", enabled: false, geography: "provider_defined", costClass: "licensed_provider", requiresApproval: true },
   ];
 }

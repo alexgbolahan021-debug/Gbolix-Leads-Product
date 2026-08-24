@@ -81,3 +81,17 @@ export const auditEvents = pgTable("audit_events", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+export const discoverySourceCredentials = pgTable("discovery_source_credentials", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  sourceKey: varchar("sourceKey", { length: 96 }).notNull(),
+  encryptedApiKey: text("encryptedApiKey"),
+  enabled: boolean("enabled").notNull().default(false),
+  approvalStatus: varchar("approvalStatus", { length: 16 }).notNull().default("candidate"),
+  priority: integer("priority").notNull().default(100),
+  maxResultsPerJob: integer("maxResultsPerJob").notNull().default(100),
+  dailyBudgetCents: integer("dailyBudgetCents").notNull().default(0),
+  updatedAt: updatedAt(),
+}, table => [uniqueIndex("discovery_source_credentials_key_unique").on(table.sourceKey)]);
+
+export type DiscoverySourceCredential = typeof discoverySourceCredentials.$inferSelect;

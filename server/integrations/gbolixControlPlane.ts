@@ -3,6 +3,7 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { parseDomainList, parseLeadCsv } from "../leads/csv";
 import { discoveryAdapterRegistry } from "../leads/adapters";
+import { getDiscoverySourceCredential, saveDiscoverySourceCredential } from "../leads/sourceCredentials";
 import { getIntegrationSecret } from "../leads/integration";
 import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestProviderDiscovery, ingestUserLeads, listPendingIntegrationEvents, markIntegrationEventDelivery } from "../leadDb";
 
@@ -30,6 +31,16 @@ export const gbolixLeadIntakeSchema = z.object({
 export function buildOpenStreetMapRequestMetadata(input: { adapterKey: string; city?: string; cities?: string[]; country?: string; regions?: string[]; keywords: string[]; requestedLimit: number }) {
   return { adapterKey: input.adapterKey, city: input.city ?? input.cities?.[0] ?? null, cities: input.cities ?? (input.city ? [input.city] : []), country: input.country ?? null, regions: input.regions ?? [], keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: input.adapterKey === "google-places-v1" ? "Google Places API" : "© OpenStreetMap contributors" };
 }
+
+const sourceSyncSchema = z.object({
+  sourceKey: z.enum(["openstreetmap-pilot-v1", "google-places-v1"]),
+  apiKey: z.string().trim().max(512).nullable().optional(),
+  enabled: z.boolean(),
+  approvalStatus: z.enum(["candidate", "approved", "blocked"]),
+  priority: z.number().int().min(1).max(10_000),
+  maxResultsPerJob: z.number().int().min(1).max(100),
+  dailyBudgetCents: z.number().int().min(0).max(100_000_000),
+});
 
 const resultsSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
@@ -133,6 +144,19 @@ export async function reconcilePendingUsageEvents() {
 }
 
 export function registerGbolixControlPlaneRoutes(app: Express) {
+  app.post("/api/integrations/gbolix/leads/sources/sync", async (req: Request, res: Response) => {
+    const payload = sourceSyncSchema.safeParse(req.body);
+    if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_SOURCE_SYNC", details: payload.error.flatten() });
+    if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
+    try {
+      await saveDiscoverySourceCredential(payload.data);
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error("Gbolix discovery source sync failed", { code: "GBOLIX_SOURCE_SYNC_FAILED", sourceKey: payload.data.sourceKey, error: error instanceof Error ? error.message : "unknown_error" });
+      return res.status(500).json({ error: "GBOLIX_SOURCE_SYNC_FAILED", message: "Unable to synchronize discovery source policy" });
+    }
+  });
+
   app.post("/api/integrations/gbolix/leads/ingest", async (req: Request, res: Response) => {
     const payload = gbolixLeadIntakeSchema.safeParse(req.body);
     if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_REQUEST", details: payload.error.flatten() });
@@ -152,6 +176,7 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
           if (!payload.data.discovery) throw new Error("Provider discovery requires at least one city, category, and limit.");
           const adapter = discoveryAdapterRegistry.find(candidate => candidate.key === payload.data.discovery?.adapterKey && candidate.sourcePolicy === "approved");
           if (!adapter) throw new Error("The requested discovery adapter is not enabled.");
+          if (!await getDiscoverySourceCredential(payload.data.discovery.adapterKey)) throw new Error("The requested discovery source is not approved or configured.");
           const cities = payload.data.discovery.cities ?? (payload.data.discovery.city ? [payload.data.discovery.city] : []);
           const discovered = await adapter.discover({ cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, categoryCode: payload.data.categoryCode, keywords: payload.data.keywords, limit: payload.data.discovery.limit });
           return ingestProviderDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, adapterKey: discovered.adapterKey, requestMetadata: buildOpenStreetMapRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
