@@ -28,7 +28,7 @@ export const gbolixLeadIntakeSchema = z.object({
 });
 
 export function buildOpenStreetMapRequestMetadata(input: { adapterKey: string; city?: string; cities?: string[]; country?: string; regions?: string[]; keywords: string[]; requestedLimit: number }) {
-  return { adapterKey: input.adapterKey, city: input.city ?? input.cities?.[0] ?? null, cities: input.cities ?? (input.city ? [input.city] : []), country: input.country ?? null, regions: input.regions ?? [], keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: "© OpenStreetMap contributors" };
+  return { adapterKey: input.adapterKey, city: input.city ?? input.cities?.[0] ?? null, cities: input.cities ?? (input.city ? [input.city] : []), country: input.country ?? null, regions: input.regions ?? [], keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: input.adapterKey === "google-places-v1" ? "Google Places API" : "© OpenStreetMap contributors" };
 }
 
 const resultsSchema = z.object({
@@ -92,7 +92,7 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
       };
       const result = payload.data.inputType === "openstreetmap_discovery"
         ? await (async () => {
-          if (!payload.data.discovery) throw new Error("OpenStreetMap discovery requires at least one city, category, and limit.");
+          if (!payload.data.discovery) throw new Error("Provider discovery requires at least one city, category, and limit.");
           const adapter = discoveryAdapterRegistry.find(candidate => candidate.key === payload.data.discovery?.adapterKey && candidate.sourcePolicy === "approved");
           if (!adapter) throw new Error("The requested discovery adapter is not enabled.");
           const cities = payload.data.discovery.cities ?? (payload.data.discovery.city ? [payload.data.discovery.city] : []);

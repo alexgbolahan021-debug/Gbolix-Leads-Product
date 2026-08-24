@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseDomainList, parseLeadCsv } from "./csv";
 import { signIntegrationPayload, verifyIntegrationSignature } from "./integration";
 import { compareLeadIdentity } from "./matching";
@@ -7,7 +7,7 @@ import { verifyEmailAndWebsite } from "./verification";
 import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
-import { getAdapterCatalog, mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
+import { getAdapterCatalog, googlePlacesAdapter, mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
 import { buildGbolixUsageCallback, buildOpenStreetMapRequestMetadata, gbolixLeadIntakeSchema, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
@@ -187,6 +187,21 @@ describe("global source catalog safeguards", () => {
     const google = getAdapterCatalog().find(source => source.key === "google-places-v1");
     expect(google).toMatchObject({ sourcePolicy: "approved", enabled: true });
     delete process.env.GOOGLE_PLACES_SOURCE_APPROVED;
+  });
+
+  it("maps an approved Google Places response into global lead records", async () => {
+    process.env.GOOGLE_PLACES_SOURCE_APPROVED = "true";
+    process.env.GOOGLE_PLACES_API_KEY = "test-google-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ places: [{ id: "places/abc", displayName: { text: "London Cafe" }, formattedAddress: "1 London Road, London", websiteUri: "https://london.example", internationalPhoneNumber: "+44 20 0000 0000", primaryType: "restaurant", googleMapsUri: "https://maps.google.com/?cid=abc" }] }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    try {
+      const result = await googlePlacesAdapter.discover({ cities: ["London"], country: "GB", categoryCode: "restaurants", limit: 1 });
+      expect(result.records[0]).toMatchObject({ businessName: "London Cafe", city: "London", country: "GB", website: "https://london.example" });
+      expect(result.provenance[0]).toMatchObject({ sourceUrl: "https://maps.google.com/?cid=abc", retentionClass: "google-places-policy-controlled" });
+    } finally {
+      vi.unstubAllGlobals();
+      delete process.env.GOOGLE_PLACES_SOURCE_APPROVED;
+      delete process.env.GOOGLE_PLACES_API_KEY;
+    }
   });
 });
 
