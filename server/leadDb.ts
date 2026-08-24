@@ -33,6 +33,7 @@ import { storageGetSignedUrl, storagePut } from "./storage";
 
 const USER_SOURCE_DEFINITION_ID = "source-user-provided-v1";
 const OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID = "source-openstreetmap-pilot-v1";
+const GOOGLE_PLACES_SOURCE_DEFINITION_ID = "source-google-places-v1";
 const SCORE_VERSION_ID = "score-opportunity-v1";
 const OPERATOR_WORKSPACE_ID = "gbolix-operator-mock";
 
@@ -95,6 +96,17 @@ export async function ensureEngineConfiguration(externalWorkspaceId = OPERATOR_W
     capabilities: { categoryCityDiscovery: true, maxResultsPerRequest: 25, attribution: "© OpenStreetMap contributors" },
     notes: "User-triggered, city-required pilot. Public Overpass/Nominatim infrastructure must not be used as the scalable commercial backend.",
   }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "OpenStreetMap pilot discovery", approvalStatus: "approved", updatedAt: new Date() } });
+  await db.insert(sourceDefinitions).values({
+    id: GOOGLE_PLACES_SOURCE_DEFINITION_ID,
+    adapterKey: "google-places-v1",
+    name: "Google Places API (official; policy-gated)",
+    sourceKind: "provider_discovery",
+    approvalStatus: process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" ? "approved" : "candidate",
+    geographyStatus: process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" ? "approved" : "candidate",
+    capabilities: { categoryCityDiscovery: true, maxResultsPerRequest: 100, requiresFieldMask: true },
+    retentionPolicy: "google-places-policy-controlled",
+    notes: "Official Google Places API only. Do not scrape Google Maps pages or treat Places content as an unrestricted warehouse.",
+  }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "Google Places API (official; policy-gated)", approvalStatus: process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" ? "approved" : "candidate", geographyStatus: process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" ? "approved" : "candidate", updatedAt: new Date() } });
   for (const category of [
     { code: "restaurants", label: "Restaurants", profile: "restaurant-opportunity-v1" },
     { code: "real-estate", label: "Real estate", profile: "real-estate-opportunity-v1" },
@@ -240,17 +252,22 @@ export async function ingestUserLeads(input: PipelineInput) {
   return { jobId, sourceId, createdCount, duplicateCount, invalid: input.invalid, leadIds: createdLeadIds, chargeableCredits: createdCount };
 }
 
-export async function ingestOpenStreetMapDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { requestMetadata: Record<string, unknown> }) {
+export async function ingestProviderDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { adapterKey: string; requestMetadata: Record<string, unknown> }) {
+  const isGooglePlaces = input.adapterKey === "google-places-v1";
   return ingestUserLeads({
     ...input,
     inputType: "openstreetmap_discovery",
-    rawContent: JSON.stringify({ adapter: "openstreetmap-pilot-v1", attribution: "© OpenStreetMap contributors", request: input.requestMetadata, records: input.valid }),
-    sourceDefinitionId: OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID,
+    rawContent: JSON.stringify({ adapter: input.adapterKey, attribution: isGooglePlaces ? "Google Maps" : "© OpenStreetMap contributors", request: input.requestMetadata, records: input.valid }),
+    sourceDefinitionId: isGooglePlaces ? GOOGLE_PLACES_SOURCE_DEFINITION_ID : OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID,
     evidenceType: "provider_record",
     observationOrigin: "provider_discovery",
-    sourceMetadata: { adapterKey: "openstreetmap-pilot-v1", attribution: "© OpenStreetMap contributors", ...input.requestMetadata },
+    sourceMetadata: { adapterKey: input.adapterKey, attribution: isGooglePlaces ? "Google Maps" : "© OpenStreetMap contributors", ...input.requestMetadata },
     operation: "discover",
   });
+}
+
+export async function ingestOpenStreetMapDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { requestMetadata: Record<string, unknown> }) {
+  return ingestProviderDiscovery({ ...input, adapterKey: "openstreetmap-pilot-v1" });
 }
 
 export async function getWorkspaceRequestResults(input: { externalWorkspaceId: string; externalRequestId: string }) {

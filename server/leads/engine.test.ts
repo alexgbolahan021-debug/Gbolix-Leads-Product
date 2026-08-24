@@ -7,7 +7,7 @@ import { verifyEmailAndWebsite } from "./verification";
 import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
-import { mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
+import { getAdapterCatalog, mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
 import { buildGbolixUsageCallback, buildOpenStreetMapRequestMetadata, gbolixLeadIntakeSchema, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
@@ -159,7 +159,34 @@ describe("signed Gbolix control-plane boundary", () => {
   });
 
   it("forwards signed optional constraints into persisted discovery metadata", () => {
-    expect(buildOpenStreetMapRequestMetadata({ adapterKey: "openstreetmap-pilot-v1", city: "Lagos, Nigeria", keywords: ["website", "automation"], requestedLimit: 5 })).toMatchObject({ keywords: ["website", "automation"], requestedLimit: 5, attribution: "© OpenStreetMap contributors" });
+    expect(buildOpenStreetMapRequestMetadata({ adapterKey: "openstreetmap-pilot-v1", city: "Lagos, Nigeria", keywords: ["website", "automation"], requestedLimit: 5 })).toMatchObject({ keywords: ["website", "automation"], attribution: "© OpenStreetMap contributors", cities: ["Lagos, Nigeria"] });
+  });
+
+  it("accepts bounded multi-city international discovery", () => {
+    const parsed = gbolixLeadIntakeSchema.parse({ externalRequestId: "grq_12345679", externalWorkspaceId: "gws_global", creditAuthorizationId: "auth_123457", label: "Global restaurants", inputType: "openstreetmap_discovery", rawContent: "", categoryCode: "restaurants", discovery: { adapterKey: "openstreetmap-pilot-v1", cities: ["Lagos, Nigeria", "London, United Kingdom", "Toronto, Canada"], country: "global", limit: 75 } });
+    expect(parsed.discovery?.cities).toHaveLength(3);
+    expect(parsed.discovery?.limit).toBe(75);
+  });
+
+  it("rejects more than ten cities in one discovery job", () => {
+    const cities = Array.from({ length: 11 }, (_, index) => `City ${index + 1}`);
+    expect(() => gbolixLeadIntakeSchema.parse({ externalRequestId: "grq_12345680", externalWorkspaceId: "gws_global", creditAuthorizationId: "auth_123458", label: "Too many cities", inputType: "openstreetmap_discovery", rawContent: "", categoryCode: "restaurants", discovery: { adapterKey: "openstreetmap-pilot-v1", cities, limit: 100 } })).toThrow();
+  });
+});
+
+describe("global source catalog safeguards", () => {
+  it("exposes a worldwide public source and policy-gated Google source", () => {
+    delete process.env.GOOGLE_PLACES_SOURCE_APPROVED;
+    const catalog = getAdapterCatalog();
+    expect(catalog.find(source => source.key === "openstreetmap-pilot-v1")).toMatchObject({ geography: "multi-country", maxCitiesPerJob: 10, maxResultsPerJob: 100, enabled: true });
+    expect(catalog.find(source => source.key === "google-places-v1")).toMatchObject({ sourcePolicy: "candidate", enabled: false, requiresApproval: true });
+  });
+
+  it("does not enable Google Places until explicit approval is configured", () => {
+    process.env.GOOGLE_PLACES_SOURCE_APPROVED = "true";
+    const google = getAdapterCatalog().find(source => source.key === "google-places-v1");
+    expect(google).toMatchObject({ sourcePolicy: "approved", enabled: true });
+    delete process.env.GOOGLE_PLACES_SOURCE_APPROVED;
   });
 });
 

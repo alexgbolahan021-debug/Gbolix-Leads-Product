@@ -4,7 +4,7 @@ import { z } from "zod";
 import { parseDomainList, parseLeadCsv } from "../leads/csv";
 import { discoveryAdapterRegistry } from "../leads/adapters";
 import { getIntegrationSecret } from "../leads/integration";
-import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestOpenStreetMapDiscovery, ingestUserLeads } from "../leadDb";
+import { authorizeWorkspaceExportDownload, createWorkspaceRequestExport, getWorkspaceRequestResults, ingestProviderDiscovery, ingestUserLeads } from "../leadDb";
 
 export const gbolixLeadIntakeSchema = z.object({
   externalRequestId: z.string().trim().min(8).max(128),
@@ -18,15 +18,17 @@ export const gbolixLeadIntakeSchema = z.object({
   categoryCode: z.string().trim().min(1).max(96),
   keywords: z.array(z.string().trim().min(1).max(80)).max(8).optional().default([]),
   discovery: z.object({
-    adapterKey: z.literal("openstreetmap-pilot-v1"),
-    city: z.string().trim().min(2).max(128),
+    adapterKey: z.enum(["openstreetmap-pilot-v1", "google-places-v1"]),
+    city: z.string().trim().min(2).max(128).optional(),
+    cities: z.array(z.string().trim().min(2).max(128)).min(1).max(10).optional(),
     country: z.string().trim().min(2).max(96).optional(),
-    limit: z.number().int().min(1).max(25),
-  }).optional(),
+    regions: z.array(z.string().trim().min(2).max(128)).max(10).optional(),
+    limit: z.number().int().min(1).max(100),
+  }).optional().refine(value => !value || Boolean(value.city || value.cities?.length), { message: "At least one discovery city is required." }),
 });
 
-export function buildOpenStreetMapRequestMetadata(input: { adapterKey: string; city: string; country?: string; keywords: string[]; requestedLimit: number }) {
-  return { adapterKey: input.adapterKey, city: input.city, country: input.country ?? null, keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: "© OpenStreetMap contributors" };
+export function buildOpenStreetMapRequestMetadata(input: { adapterKey: string; city?: string; cities?: string[]; country?: string; regions?: string[]; keywords: string[]; requestedLimit: number }) {
+  return { adapterKey: input.adapterKey, city: input.city ?? input.cities?.[0] ?? null, cities: input.cities ?? (input.city ? [input.city] : []), country: input.country ?? null, regions: input.regions ?? [], keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: "© OpenStreetMap contributors" };
 }
 
 const resultsSchema = z.object({
@@ -90,11 +92,12 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
       };
       const result = payload.data.inputType === "openstreetmap_discovery"
         ? await (async () => {
-          if (!payload.data.discovery) throw new Error("OpenStreetMap pilot discovery requires a city, category, and limit.");
+          if (!payload.data.discovery) throw new Error("OpenStreetMap discovery requires at least one city, category, and limit.");
           const adapter = discoveryAdapterRegistry.find(candidate => candidate.key === payload.data.discovery?.adapterKey && candidate.sourcePolicy === "approved");
           if (!adapter) throw new Error("The requested discovery adapter is not enabled.");
-          const discovered = await adapter.discover({ cities: [payload.data.discovery.city], country: payload.data.discovery.country, categoryCode: payload.data.categoryCode, keywords: payload.data.keywords, limit: payload.data.discovery.limit });
-          return ingestOpenStreetMapDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, requestMetadata: buildOpenStreetMapRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, country: payload.data.discovery.country, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
+          const cities = payload.data.discovery.cities ?? (payload.data.discovery.city ? [payload.data.discovery.city] : []);
+          const discovered = await adapter.discover({ cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, categoryCode: payload.data.categoryCode, keywords: payload.data.keywords, limit: payload.data.discovery.limit });
+          return ingestProviderDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, adapterKey: discovered.adapterKey, requestMetadata: buildOpenStreetMapRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
         })()
         : await (async () => {
           if (!payload.data.rawContent.trim()) throw new Error("A CSV or domain-list source is required.");
