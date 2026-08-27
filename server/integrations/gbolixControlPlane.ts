@@ -37,7 +37,8 @@ export const buildOpenStreetMapRequestMetadata = buildDiscoveryRequestMetadata;
 
 const sourceSyncSchema = z.object({
   sourceKey: z.enum(["openstreetmap-pilot-v1", "foursquare-places-v1", "google-places-v1"]),
-  apiKey: z.string().trim().max(512).nullable().optional(),
+  apiKey: z.string().trim().max(2000).nullable().optional(),
+  developmentFixtureEnabled: z.boolean().optional(),
   enabled: z.boolean(),
   approvalStatus: z.enum(["candidate", "approved", "blocked"]),
   priority: z.number().int().min(1).max(10_000),
@@ -152,7 +153,7 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
     if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_SOURCE_SYNC", details: payload.error.flatten() });
     if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
     try {
-          await saveDiscoverySourceCredential({ ...payload.data, encryptedApiKey: payload.data.apiKey });
+          await saveDiscoverySourceCredential({ ...payload.data, encryptedApiKey: payload.data.apiKey, developmentFixtureEnabled: payload.data.developmentFixtureEnabled === true });
       return res.json({ ok: true });
     } catch (error) {
       console.error("Gbolix discovery source sync failed", { code: "GBOLIX_SOURCE_SYNC_FAILED", sourceKey: payload.data.sourceKey, error: error instanceof Error ? error.message : "unknown_error" });

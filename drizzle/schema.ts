@@ -87,6 +87,7 @@ export const discoverySourceCredentials = pgTable("discovery_source_credentials"
   sourceKey: varchar("sourceKey", { length: 96 }).notNull(),
   encryptedApiKey: text("encryptedApiKey"),
   enabled: boolean("enabled").notNull().default(false),
+  developmentFixtureEnabled: boolean("developmentFixtureEnabled").notNull().default(false),
   approvalStatus: varchar("approvalStatus", { length: 16 }).notNull().default("candidate"),
   priority: integer("priority").notNull().default(100),
   maxResultsPerJob: integer("maxResultsPerJob").notNull().default(100),

@@ -243,12 +243,12 @@ export function createFoursquareMockPlaces(count: number, city = "Austin", count
 }
 
 async function discoverFoursquareCity(request: DiscoveryAdapterRequest, city: string, limit: number) {
-  if (process.env.NODE_ENV !== "production" && process.env.FOURSQUARE_MOCK_MODE === "true") {
+  const source = await getDiscoverySourceCredential("foursquare-places-v1");
+  if (process.env.NODE_ENV !== "production" && (process.env.FOURSQUARE_MOCK_MODE === "true" || source?.developmentFixtureEnabled === true)) {
     const mockPlaces = createFoursquareMockPlaces(limit, city, request.country ?? "US");
     const retrievedAt = new Date().toISOString();
     return { records: mockPlaces.map(place => mapFoursquarePlace(place, { city, country: request.country }, request.categoryCode ?? "restaurants")).filter((record): record is LeadInput => Boolean(record)), provenance: mockPlaces.map(place => ({ sourceUrl: `https://foursquare.com/places/${place.fsq_place_id}`, retrievedAt, retentionClass: "foursquare-development-fixture" })) };
   }
-  const source = await getDiscoverySourceCredential("foursquare-places-v1");
   const apiKey = source?.apiKey;
   if (!apiKey) throw new Error("Foursquare Places source is not approved or configured in the Leads admin portal.");
   const location = await resolveCityCoordinates(city, request.country);
