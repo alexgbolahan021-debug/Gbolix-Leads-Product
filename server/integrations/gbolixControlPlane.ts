@@ -152,7 +152,7 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
     if (!payload.success) return res.status(400).json({ error: "INVALID_GBOLIX_SOURCE_SYNC", details: payload.error.flatten() });
     if (!verifySignedPayload(req, payload.data)) return res.status(401).json({ error: "GBOLIX_SIGNATURE_INVALID" });
     try {
-      await saveDiscoverySourceCredential(payload.data);
+          await saveDiscoverySourceCredential({ ...payload.data, encryptedApiKey: payload.data.apiKey });
       return res.json({ ok: true });
     } catch (error) {
       console.error("Gbolix discovery source sync failed", { code: "GBOLIX_SOURCE_SYNC_FAILED", sourceKey: payload.data.sourceKey, error: error instanceof Error ? error.message : "unknown_error" });

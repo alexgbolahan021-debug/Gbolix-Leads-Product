@@ -2,7 +2,7 @@ import { createHmac } from "crypto";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ ingestProviderDiscovery: vi.fn(), discover: vi.fn(), listPendingIntegrationEvents: vi.fn(), markIntegrationEventDelivery: vi.fn() }));
+const mocks = vi.hoisted(() => ({ ingestProviderDiscovery: vi.fn(), discover: vi.fn(), listPendingIntegrationEvents: vi.fn(), markIntegrationEventDelivery: vi.fn(), saveDiscoverySourceCredential: vi.fn() }));
 
 vi.mock("../leadDb", () => ({
   authorizeWorkspaceExportDownload: vi.fn(),
@@ -12,6 +12,11 @@ vi.mock("../leadDb", () => ({
   ingestUserLeads: vi.fn(),
   listPendingIntegrationEvents: mocks.listPendingIntegrationEvents,
   markIntegrationEventDelivery: mocks.markIntegrationEventDelivery,
+}));
+
+vi.mock("../leads/sourceCredentials", () => ({
+  getDiscoverySourceCredential: vi.fn().mockResolvedValue({ id: "source-openstreetmap-pilot-v1", sourceKey: "openstreetmap-pilot-v1", enabled: true, approvalStatus: "approved", maxResultsPerJob: 100 }),
+  saveDiscoverySourceCredential: mocks.saveDiscoverySourceCredential,
 }));
 
 vi.mock("../leads/adapters", () => ({
@@ -27,12 +32,32 @@ afterEach(() => {
   mocks.discover.mockReset();
   mocks.listPendingIntegrationEvents.mockReset();
   mocks.markIntegrationEventDelivery.mockReset();
+  mocks.saveDiscoverySourceCredential.mockReset();
   vi.unstubAllGlobals();
   delete process.env.GBOLIX_CONTROL_PLANE_CALLBACK_URL;
   delete process.env.GBOLIX_CONTROL_PLANE_CALLBACK_SECRET;
 });
 
 describe("signed discovery intake", () => {
+  it("persists the Foursquare API key from a signed source sync", async () => {
+    mocks.saveDiscoverySourceCredential.mockResolvedValue({ id: "source-foursquare-places-v1" });
+    const payload = { sourceKey: "foursquare-places-v1", apiKey: "development-test-service-key", enabled: true, approvalStatus: "approved", priority: 15, maxResultsPerJob: 100, dailyBudgetCents: 100 };
+    const timestamp = new Date().toISOString();
+    const signature = createHmac("sha256", "control-plane-route-test-secret").update(`${timestamp}.${JSON.stringify(payload)}`).digest("hex");
+    const app = express();
+    app.use(express.json());
+    registerGbolixControlPlaneRoutes(app);
+    const server = app.listen(0);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Unable to start test server");
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/integrations/gbolix/leads/sources/sync`, { method: "POST", headers: { "Content-Type": "application/json", "X-Gbolix-Timestamp": timestamp, "X-Gbolix-Signature": signature }, body: JSON.stringify(payload) });
+      expect(response.status).toBe(200);
+      expect(mocks.saveDiscoverySourceCredential).toHaveBeenCalledWith(expect.objectContaining({ sourceKey: "foursquare-places-v1", encryptedApiKey: "development-test-service-key" }));
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
   it("forwards confirmed chat constraints into the discovery persistence metadata", async () => {
     mocks.discover.mockResolvedValue({ adapterKey: "openstreetmap-pilot-v1", records: [], provenance: [] });
     mocks.ingestProviderDiscovery.mockResolvedValue({ jobId: "job_1", createdCount: 0, duplicateCount: 0 });
