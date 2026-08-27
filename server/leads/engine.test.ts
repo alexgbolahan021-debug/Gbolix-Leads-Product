@@ -9,6 +9,7 @@ import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, export
 import { FixedWindowRateLimiter } from "./rateLimit";
 import { createFoursquareMockPlaces, foursquarePlacesAdapter, getAdapterCatalog, googlePlacesAdapter, mapFoursquarePlace, mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
 import { buildGbolixUsageCallback, buildOpenStreetMapRequestMetadata, gbolixLeadIntakeSchema, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
+import { providerDiscoverySourceConfig } from "../leadDb";
 
 describe("controlled source parsing", () => {
   it("permits a new taxonomy code without changing the input contract", () => {
@@ -204,6 +205,9 @@ describe("signed Gbolix control-plane boundary", () => {
 });
 
 describe("Foursquare provider discovery", () => {
+  it("preserves Foursquare attribution and retention metadata for persistence", () => {
+    expect(providerDiscoverySourceConfig("foursquare-places-v1")).toEqual({ sourceDefinitionId: "source-foursquare-places-v1", attribution: "Foursquare Places API", retentionClass: "foursquare-policy-controlled" });
+  });
   it("maps the current official response shape into a normalized lead", () => {
     expect(mapFoursquarePlace({ fsq_place_id: "fsq_123", name: "Austin Table", categories: [{ name: "Restaurant", fsq_category_id: "food-restaurant" }], location: { formatted_address: "1 Congress Avenue, Austin, TX", locality: "Austin", region: "Texas", country: "US", postcode: "78701" }, website: "https://austin-table.example", tel: "+1 512 555 0100" }, { city: "Austin", country: "US" }, "restaurants")).toMatchObject({ businessName: "Austin Table", city: "Austin", region: "Texas", country: "US", website: "https://austin-table.example", phone: "+1 512 555 0100", categoryCode: "restaurants" });
   });

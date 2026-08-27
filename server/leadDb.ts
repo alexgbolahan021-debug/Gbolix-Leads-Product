@@ -34,8 +34,15 @@ import { storageGetSignedUrl, storagePut } from "./storage";
 const USER_SOURCE_DEFINITION_ID = "source-user-provided-v1";
 const OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID = "source-openstreetmap-pilot-v1";
 const GOOGLE_PLACES_SOURCE_DEFINITION_ID = "source-google-places-v1";
+const FOURSQUARE_SOURCE_DEFINITION_ID = "source-foursquare-places-v1";
 const SCORE_VERSION_ID = "score-opportunity-v1";
 const OPERATOR_WORKSPACE_ID = "gbolix-operator-mock";
+
+export function providerDiscoverySourceConfig(adapterKey: string) {
+  if (adapterKey === "google-places-v1") return { sourceDefinitionId: GOOGLE_PLACES_SOURCE_DEFINITION_ID, attribution: "Google Places API", retentionClass: "google-places-policy-controlled" };
+  if (adapterKey === "foursquare-places-v1") return { sourceDefinitionId: FOURSQUARE_SOURCE_DEFINITION_ID, attribution: "Foursquare Places API", retentionClass: "foursquare-policy-controlled" };
+  return { sourceDefinitionId: OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID, attribution: "© OpenStreetMap contributors", retentionClass: "openstreetmap-pilot" };
+}
 
 type PipelineInput = {
   workspaceId?: string;
@@ -96,6 +103,17 @@ export async function ensureEngineConfiguration(externalWorkspaceId = OPERATOR_W
     capabilities: { categoryCityDiscovery: true, maxResultsPerRequest: 25, attribution: "© OpenStreetMap contributors" },
     notes: "User-triggered, city-required pilot. Public Overpass/Nominatim infrastructure must not be used as the scalable commercial backend.",
   }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "OpenStreetMap pilot discovery", approvalStatus: "approved", updatedAt: new Date() } });
+  await db.insert(sourceDefinitions).values({
+    id: FOURSQUARE_SOURCE_DEFINITION_ID,
+    adapterKey: "foursquare-places-v1",
+    name: "Foursquare Places API (official; policy-gated)",
+    sourceKind: "provider_discovery",
+    approvalStatus: "candidate",
+    geographyStatus: "candidate",
+    capabilities: { categoryCityDiscovery: true, maxResultsPerRequest: 100, pagination: true },
+    retentionPolicy: "foursquare-policy-controlled",
+    notes: "Official Foursquare Places API only. Do not scrape consumer map pages or treat provider content as an unrestricted warehouse.",
+  }).onConflictDoUpdate({ target: sourceDefinitions.adapterKey, set: { name: "Foursquare Places API (official; policy-gated)", approvalStatus: "candidate", geographyStatus: "candidate", updatedAt: new Date() } });
   await db.insert(sourceDefinitions).values({
     id: GOOGLE_PLACES_SOURCE_DEFINITION_ID,
     adapterKey: "google-places-v1",
@@ -217,7 +235,7 @@ export async function ingestUserLeads(input: PipelineInput) {
     });
     const evidenceId = id("evidence");
     const recordProvenance = input.provenance?.[candidateIndex];
-    await db.insert(evidenceRecords).values({ id: evidenceId, leadId, ingestionSourceId: sourceId, evidenceType: input.evidenceType ?? "user_row", sourceUrl: recordProvenance?.sourceUrl ?? null, sourceLabel: input.label, excerpt: JSON.stringify(candidate).slice(0, 8000), retrievalStatus: "captured", retentionClass: recordProvenance?.retentionClass ?? (isDiscovery ? "openstreetmap-pilot" : "workspace-controlled"), metadata: { rowSource: isDiscovery ? "provider_discovery" : "user_provided", retrievedAt: recordProvenance?.retrievedAt, ...(input.sourceMetadata ?? {}) } });
+    await db.insert(evidenceRecords).values({ id: evidenceId, leadId, ingestionSourceId: sourceId, evidenceType: input.evidenceType ?? "user_row", sourceUrl: recordProvenance?.sourceUrl ?? null, sourceLabel: input.label, excerpt: JSON.stringify(candidate).slice(0, 8000), retrievalStatus: "captured", retentionClass: recordProvenance?.retentionClass ?? (isDiscovery ? String(input.sourceMetadata?.retentionClass ?? "openstreetmap-pilot") : "workspace-controlled"), metadata: { rowSource: isDiscovery ? "provider_discovery" : "user_provided", retrievedAt: recordProvenance?.retrievedAt, ...(input.sourceMetadata ?? {}) } });
     for (const [fieldKey, value] of Object.entries(candidate)) {
       if (!value) continue;
       await db.insert(leadFieldObservations).values({ id: id("obs"), leadId, evidenceId, fieldKey, value: String(value), normalizedValue: ["website", "email", "phone"].includes(fieldKey) ? String(value).toLowerCase() : null, origin: input.observationOrigin ?? "user_provided", verificationState: fieldKey === "email" ? verification.state : "unverified", confidence: fieldKey === "email" ? verification.confidence : 0.55, isCanonical: true });
@@ -254,15 +272,15 @@ export async function ingestUserLeads(input: PipelineInput) {
 }
 
 export async function ingestProviderDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { adapterKey: string; requestMetadata: Record<string, unknown> }) {
-  const isGooglePlaces = input.adapterKey === "google-places-v1";
+  const source = providerDiscoverySourceConfig(input.adapterKey);
   return ingestUserLeads({
     ...input,
     inputType: "openstreetmap_discovery",
-    rawContent: JSON.stringify({ adapter: input.adapterKey, attribution: isGooglePlaces ? "Google Places API" : "© OpenStreetMap contributors", request: input.requestMetadata, records: input.valid }),
-    sourceDefinitionId: isGooglePlaces ? GOOGLE_PLACES_SOURCE_DEFINITION_ID : OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID,
+    rawContent: JSON.stringify({ adapter: input.adapterKey, attribution: source.attribution, request: input.requestMetadata, records: input.valid }),
+    sourceDefinitionId: source.sourceDefinitionId,
     evidenceType: "provider_record",
     observationOrigin: "provider_discovery",
-    sourceMetadata: { adapterKey: input.adapterKey, attribution: isGooglePlaces ? "Google Places API" : "© OpenStreetMap contributors", ...input.requestMetadata },
+    sourceMetadata: { adapterKey: input.adapterKey, attribution: source.attribution, retentionClass: source.retentionClass, ...input.requestMetadata },
     operation: "discover",
   });
 }
