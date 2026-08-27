@@ -40,11 +40,12 @@ export async function ensureDiscoverySourceCredentialsTable() {
   )`);
   await db.insert(discoverySourceCredentials).values([
     { id: "source-openstreetmap-pilot-v1", sourceKey: "openstreetmap-pilot-v1", enabled: true, approvalStatus: "approved", priority: 10 },
+    { id: "source-foursquare-places-v1", sourceKey: "foursquare-places-v1", enabled: false, approvalStatus: "candidate", priority: 15 },
     { id: "source-google-places-v1", sourceKey: "google-places-v1", enabled: false, approvalStatus: "candidate", priority: 20 },
   ]).onConflictDoNothing();
 }
 
-export async function saveDiscoverySourceCredential(input: { sourceKey: "openstreetmap-pilot-v1" | "google-places-v1"; encryptedApiKey?: string | null; enabled: boolean; approvalStatus: "candidate" | "approved" | "blocked"; priority: number; maxResultsPerJob: number; dailyBudgetCents: number }) {
+export async function saveDiscoverySourceCredential(input: { sourceKey: "openstreetmap-pilot-v1" | "foursquare-places-v1" | "google-places-v1"; encryptedApiKey?: string | null; enabled: boolean; approvalStatus: "candidate" | "approved" | "blocked"; priority: number; maxResultsPerJob: number; dailyBudgetCents: number }) {
   const db = await getDb();
   if (!db) throw new Error("LEADS_DATABASE_UNAVAILABLE");
   await ensureDiscoverySourceCredentialsTable();
@@ -55,17 +56,20 @@ export async function saveDiscoverySourceCredential(input: { sourceKey: "openstr
   return saved;
 }
 
-export async function getDiscoverySourceCredential(sourceKey: "openstreetmap-pilot-v1" | "google-places-v1") {
+export async function getDiscoverySourceCredential(sourceKey: "openstreetmap-pilot-v1" | "foursquare-places-v1" | "google-places-v1") {
+  if (sourceKey === "foursquare-places-v1" && process.env.NODE_ENV !== "production" && process.env.FOURSQUARE_MOCK_MODE === "true") return { id: "source-foursquare-places-v1", sourceKey, encryptedApiKey: null, enabled: true, approvalStatus: "approved", priority: 15, maxResultsPerJob: 100, dailyBudgetCents: 0, updatedAt: new Date(), apiKey: "mock-foursquare-key" };
   const db = await getDb();
   if (!db) {
     if (sourceKey === "openstreetmap-pilot-v1") return { id: "source-openstreetmap-pilot-v1", sourceKey, encryptedApiKey: null, enabled: true, approvalStatus: "approved", priority: 10, maxResultsPerJob: 100, dailyBudgetCents: 0, updatedAt: new Date(), apiKey: null };
-    const legacyKey = process.env.GOOGLE_PLACES_API_KEY?.trim();
-    if (process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" && legacyKey) return { id: "source-google-places-v1", sourceKey, encryptedApiKey: null, enabled: true, approvalStatus: "approved", priority: 20, maxResultsPerJob: 100, dailyBudgetCents: 0, updatedAt: new Date(), apiKey: legacyKey };
+
+    const legacyKey = sourceKey === "google-places-v1" ? process.env.GOOGLE_PLACES_API_KEY?.trim() : process.env.FOURSQUARE_PLACES_API_KEY?.trim();
+    if (process.env.GOOGLE_PLACES_SOURCE_APPROVED === "true" && sourceKey === "google-places-v1" && legacyKey) return { id: "source-google-places-v1", sourceKey, encryptedApiKey: null, enabled: true, approvalStatus: "approved", priority: 20, maxResultsPerJob: 100, dailyBudgetCents: 0, updatedAt: new Date(), apiKey: legacyKey };
+    if (process.env.FOURSQUARE_SOURCE_APPROVED === "true" && sourceKey === "foursquare-places-v1" && legacyKey) return { id: "source-foursquare-places-v1", sourceKey, encryptedApiKey: null, enabled: true, approvalStatus: "approved", priority: 15, maxResultsPerJob: 100, dailyBudgetCents: 0, updatedAt: new Date(), apiKey: legacyKey };
     return null;
   }
   await ensureDiscoverySourceCredentialsTable();
   const [source] = await db.select().from(discoverySourceCredentials).where(eq(discoverySourceCredentials.sourceKey, sourceKey)).limit(1);
   if (!source || !source.enabled || source.approvalStatus !== "approved") return null;
-  if (sourceKey === "google-places-v1" && !source.encryptedApiKey) return null;
+  if (sourceKey !== "openstreetmap-pilot-v1" && !source.encryptedApiKey) return null;
   return { ...source, apiKey: source.encryptedApiKey ? decrypt(source.encryptedApiKey) : null };
 }

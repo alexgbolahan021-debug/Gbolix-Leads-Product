@@ -7,7 +7,7 @@ import { verifyEmailAndWebsite } from "./verification";
 import { leadInputSchema } from "@shared/leadContracts";
 import { aiInferenceObservationPolicy, buildCrossSourceVerificationCheck, exportAccessDecision, resolveCrossSourceEmail, resolveCrossSourceValue, usageEventIdempotencyKey } from "./policy";
 import { FixedWindowRateLimiter } from "./rateLimit";
-import { getAdapterCatalog, googlePlacesAdapter, mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
+import { createFoursquareMockPlaces, foursquarePlacesAdapter, getAdapterCatalog, googlePlacesAdapter, mapFoursquarePlace, mapOpenStreetMapElement, openStreetMapPilotAdapter } from "./adapters";
 import { buildGbolixUsageCallback, buildOpenStreetMapRequestMetadata, gbolixLeadIntakeSchema, verifyGbolixInboundSignature } from "../integrations/gbolixControlPlane";
 
 describe("controlled source parsing", () => {
@@ -200,6 +200,55 @@ describe("signed Gbolix control-plane boundary", () => {
   it("rejects more than ten cities in one discovery job", () => {
     const cities = Array.from({ length: 11 }, (_, index) => `City ${index + 1}`);
     expect(() => gbolixLeadIntakeSchema.parse({ externalRequestId: "grq_12345680", externalWorkspaceId: "gws_global", creditAuthorizationId: "auth_123458", label: "Too many cities", inputType: "openstreetmap_discovery", rawContent: "", categoryCode: "restaurants", discovery: { adapterKey: "openstreetmap-pilot-v1", cities, limit: 100 } })).toThrow();
+  });
+});
+
+describe("Foursquare provider discovery", () => {
+  it("maps the current official response shape into a normalized lead", () => {
+    expect(mapFoursquarePlace({ fsq_place_id: "fsq_123", name: "Austin Table", categories: [{ name: "Restaurant", fsq_category_id: "food-restaurant" }], location: { formatted_address: "1 Congress Avenue, Austin, TX", locality: "Austin", region: "Texas", country: "US", postcode: "78701" }, website: "https://austin-table.example", tel: "+1 512 555 0100" }, { city: "Austin", country: "US" }, "restaurants")).toMatchObject({ businessName: "Austin Table", city: "Austin", region: "Texas", country: "US", website: "https://austin-table.example", phone: "+1 512 555 0100", categoryCode: "restaurants" });
+  });
+
+  it("returns 100 development records without calling an external provider", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.FOURSQUARE_MOCK_MODE = "true";
+    try {
+      const result = await foursquarePlacesAdapter.discover({ cities: ["Austin"], country: "US", categoryCode: "restaurants", limit: 100 });
+      expect(result.adapterKey).toBe("foursquare-places-v1");
+      expect(result.records).toHaveLength(100);
+      expect(result.provenance).toHaveLength(100);
+      expect(result.records[0]).toMatchObject({ city: "Austin", country: "US", categoryCode: "restaurants" });
+      expect(getAdapterCatalog().find(source => source.key === "foursquare-places-v1")).toMatchObject({ sourcePolicy: "approved", enabled: true, maxResultsPerJob: 100 });
+    } finally {
+      delete process.env.FOURSQUARE_MOCK_MODE;
+    }
+  });
+
+  it("keeps the fixture shape large enough for the requested development test", () => {
+    expect(createFoursquareMockPlaces(100, "Austin", "US")).toHaveLength(100);
+  });
+
+  it("follows one official pagination link to collect 100 places", async () => {
+    delete process.env.FOURSQUARE_MOCK_MODE;
+    process.env.FOURSQUARE_SOURCE_APPROVED = "true";
+    process.env.FOURSQUARE_PLACES_API_KEY = "development-only-test-key";
+    const firstPage = createFoursquareMockPlaces(50, "Chicago Pagination Test", "US");
+    const secondPage = createFoursquareMockPlaces(50, "Chicago Pagination Test", "US").map((place, index) => ({ ...place, fsq_place_id: `second_${index + 1}`, name: `Second Page Restaurant ${index + 1}` }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ lat: "41.8781", lon: "-87.6298", address: { country_code: "us" } }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: firstPage }), { status: 200, headers: { link: "https://places-api.foursquare.com/places/search?cursor=next-page" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: secondPage }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const result = await foursquarePlacesAdapter.discover({ cities: ["Chicago Pagination Test"], country: "US", categoryCode: "restaurants", limit: 100 });
+      expect(result.records).toHaveLength(100);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(String(fetchMock.mock.calls[1]?.[0])).toContain("limit=50");
+      expect(String(fetchMock.mock.calls[2]?.[0])).toContain("cursor=next-page");
+    } finally {
+      vi.unstubAllGlobals();
+      delete process.env.FOURSQUARE_SOURCE_APPROVED;
+      delete process.env.FOURSQUARE_PLACES_API_KEY;
+    }
   });
 });
 

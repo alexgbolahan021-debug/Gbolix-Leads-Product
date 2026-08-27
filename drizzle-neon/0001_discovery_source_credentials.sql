@@ -12,5 +12,6 @@ CREATE TABLE IF NOT EXISTS discovery_source_credentials (
 
 INSERT INTO discovery_source_credentials (id, "sourceKey", "enabled", "approvalStatus", priority, "maxResultsPerJob", "dailyBudgetCents") VALUES
   ('source-openstreetmap-pilot-v1', 'openstreetmap-pilot-v1', true, 'approved', 10, 100, 0),
+  ('source-foursquare-places-v1', 'foursquare-places-v1', false, 'candidate', 15, 100, 0),
   ('source-google-places-v1', 'google-places-v1', false, 'candidate', 20, 100, 0)
 ON CONFLICT ("sourceKey") DO NOTHING;
