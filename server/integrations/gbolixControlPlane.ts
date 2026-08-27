@@ -19,7 +19,7 @@ export const gbolixLeadIntakeSchema = z.object({
   categoryCode: z.string().trim().min(1).max(96),
   keywords: z.array(z.string().trim().min(1).max(80)).max(8).optional().default([]),
   discovery: z.object({
-    adapterKey: z.enum(["openstreetmap-pilot-v1", "google-places-v1"]),
+    adapterKey: z.enum(["openstreetmap-pilot-v1", "foursquare-places-v1", "google-places-v1"]),
     city: z.string().trim().min(2).max(128).optional(),
     cities: z.array(z.string().trim().min(2).max(128)).min(1).max(10).optional(),
     country: z.string().trim().min(2).max(96).optional(),
@@ -28,12 +28,15 @@ export const gbolixLeadIntakeSchema = z.object({
   }).optional().refine(value => !value || Boolean(value.city || value.cities?.length), { message: "At least one discovery city is required." }),
 });
 
-export function buildOpenStreetMapRequestMetadata(input: { adapterKey: string; city?: string; cities?: string[]; country?: string; regions?: string[]; keywords: string[]; requestedLimit: number }) {
-  return { adapterKey: input.adapterKey, city: input.city ?? input.cities?.[0] ?? null, cities: input.cities ?? (input.city ? [input.city] : []), country: input.country ?? null, regions: input.regions ?? [], keywords: input.keywords, requestedLimit: input.requestedLimit, attribution: input.adapterKey === "google-places-v1" ? "Google Places API" : "© OpenStreetMap contributors" };
+export function buildDiscoveryRequestMetadata(input: { adapterKey: string; city?: string; cities?: string[]; country?: string; regions?: string[]; keywords: string[]; requestedLimit: number }) {
+  const attribution = input.adapterKey === "google-places-v1" ? "Google Places API" : input.adapterKey === "foursquare-places-v1" ? "Foursquare Places API" : "© OpenStreetMap contributors";
+  return { adapterKey: input.adapterKey, city: input.city ?? input.cities?.[0] ?? null, cities: input.cities ?? (input.city ? [input.city] : []), country: input.country ?? null, regions: input.regions ?? [], keywords: input.keywords, requestedLimit: input.requestedLimit, attribution };
 }
 
+export const buildOpenStreetMapRequestMetadata = buildDiscoveryRequestMetadata;
+
 const sourceSyncSchema = z.object({
-  sourceKey: z.enum(["openstreetmap-pilot-v1", "google-places-v1"]),
+  sourceKey: z.enum(["openstreetmap-pilot-v1", "foursquare-places-v1", "google-places-v1"]),
   apiKey: z.string().trim().max(512).nullable().optional(),
   enabled: z.boolean(),
   approvalStatus: z.enum(["candidate", "approved", "blocked"]),
@@ -179,7 +182,7 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
           if (!await getDiscoverySourceCredential(payload.data.discovery.adapterKey)) throw new Error("The requested discovery source is not approved or configured.");
           const cities = payload.data.discovery.cities ?? (payload.data.discovery.city ? [payload.data.discovery.city] : []);
           const discovered = await adapter.discover({ cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, categoryCode: payload.data.categoryCode, keywords: payload.data.keywords, limit: payload.data.discovery.limit });
-          return ingestProviderDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, adapterKey: discovered.adapterKey, requestMetadata: buildOpenStreetMapRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
+          return ingestProviderDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, adapterKey: discovered.adapterKey, requestMetadata: buildDiscoveryRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
         })()
         : await (async () => {
           if (!payload.data.rawContent.trim()) throw new Error("A CSV or domain-list source is required.");
