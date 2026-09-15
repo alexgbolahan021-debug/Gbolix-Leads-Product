@@ -14,7 +14,7 @@ export const gbolixLeadIntakeSchema = z.object({
   actorId: z.string().trim().max(128).optional(),
   creditAuthorizationId: z.string().trim().min(6).max(128),
   label: z.string().trim().min(1).max(255),
-  inputType: z.enum(["csv_upload", "domain_list", "openstreetmap_discovery"]),
+  inputType: z.enum(["csv_upload", "domain_list", "openstreetmap_discovery", "ai_research"]),
   rawContent: z.string().max(1_000_000),
   categoryCode: z.string().trim().min(1).max(96),
   keywords: z.array(z.string().trim().min(1).max(80)).max(8).optional().default([]),
@@ -26,6 +26,22 @@ export const gbolixLeadIntakeSchema = z.object({
     regions: z.array(z.string().trim().min(2).max(128)).max(10).optional(),
     limit: z.number().int().min(1).max(100),
   }).optional().refine(value => !value || Boolean(value.city || value.cities?.length), { message: "At least one discovery city is required." }),
+  researchRecords: z.array(z.object({
+    businessName: z.string().trim().min(1).max(320),
+    website: z.string().url().max(2048).nullable().optional(),
+    email: z.string().email().max(320).nullable().optional(),
+    phone: z.string().trim().max(64).nullable().optional(),
+    industry: z.string().trim().max(255).nullable().optional(),
+    description: z.string().trim().max(4000).nullable().optional(),
+    country: z.string().trim().max(96).nullable().optional(),
+    region: z.string().trim().max(128).nullable().optional(),
+    city: z.string().trim().max(128).nullable().optional(),
+    address: z.string().trim().max(1000).nullable().optional(),
+    postalCode: z.string().trim().max(32).nullable().optional(),
+    categoryCode: z.string().trim().max(96).nullable().optional(),
+    sourceUrl: z.string().url().max(2048),
+    evidence: z.string().trim().min(1).max(8000),
+  })).max(100).optional(),
 });
 
 export function buildDiscoveryRequestMetadata(input: { adapterKey: string; city?: string; cities?: string[]; country?: string; regions?: string[]; keywords: string[]; requestedLimit: number }) {
@@ -184,6 +200,12 @@ export function registerGbolixControlPlaneRoutes(app: Express) {
           const cities = payload.data.discovery.cities ?? (payload.data.discovery.city ? [payload.data.discovery.city] : []);
           const discovered = await adapter.discover({ cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, categoryCode: payload.data.categoryCode, keywords: payload.data.keywords, limit: payload.data.discovery.limit });
           return ingestProviderDiscovery({ ...common, valid: discovered.records, invalid: [], provenance: discovered.provenance, adapterKey: discovered.adapterKey, requestMetadata: buildDiscoveryRequestMetadata({ adapterKey: discovered.adapterKey, city: payload.data.discovery.city, cities, country: payload.data.discovery.country, regions: payload.data.discovery.regions, keywords: payload.data.keywords, requestedLimit: payload.data.discovery.limit }) });
+        })()
+        : payload.data.inputType === "ai_research"
+        ? await (async () => {
+          const records = payload.data.researchRecords ?? [];
+          if (!records.length) throw new Error("Verified AI research returned no usable records.");
+          return ingestProviderDiscovery({ ...common, valid: records.map(record => ({ ...record, website: record.website ?? "", email: record.email ?? "", phone: record.phone ?? "", industry: record.industry ?? "", description: record.description ?? "", country: record.country ?? "", region: record.region ?? "", city: record.city ?? "", address: record.address ?? "", postalCode: record.postalCode ?? "", categoryCode: record.categoryCode ?? payload.data.categoryCode })), invalid: [], provenance: records.map(record => ({ sourceUrl: record.sourceUrl, retrievedAt: new Date().toISOString(), retentionClass: "ai-research-evidence" })), adapterKey: "ai-research-v1", requestMetadata: { provider: "configured_ai_research", evidenceBound: true, verifiedRecordCount: records.length, requestedLimit: records.length } });
         })()
         : await (async () => {
           if (!payload.data.rawContent.trim()) throw new Error("A CSV or domain-list source is required.");

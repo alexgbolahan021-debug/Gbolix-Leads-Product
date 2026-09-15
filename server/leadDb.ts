@@ -35,12 +35,14 @@ const USER_SOURCE_DEFINITION_ID = "source-user-provided-v1";
 const OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID = "source-openstreetmap-pilot-v1";
 const GOOGLE_PLACES_SOURCE_DEFINITION_ID = "source-google-places-v1";
 const FOURSQUARE_SOURCE_DEFINITION_ID = "source-foursquare-places-v1";
+const AI_RESEARCH_SOURCE_DEFINITION_ID = "source-ai-research-v1";
 const SCORE_VERSION_ID = "score-opportunity-v1";
 const OPERATOR_WORKSPACE_ID = "gbolix-operator-mock";
 
 export function providerDiscoverySourceConfig(adapterKey: string) {
   if (adapterKey === "google-places-v1") return { sourceDefinitionId: GOOGLE_PLACES_SOURCE_DEFINITION_ID, attribution: "Google Places API", retentionClass: "google-places-policy-controlled" };
   if (adapterKey === "foursquare-places-v1") return { sourceDefinitionId: FOURSQUARE_SOURCE_DEFINITION_ID, attribution: "Foursquare Places API", retentionClass: "foursquare-policy-controlled" };
+  if (adapterKey === "ai-research-v1") return { sourceDefinitionId: AI_RESEARCH_SOURCE_DEFINITION_ID, attribution: "Verified AI research evidence", retentionClass: "ai-research-evidence" };
   return { sourceDefinitionId: OPENSTREETMAP_PILOT_SOURCE_DEFINITION_ID, attribution: "© OpenStreetMap contributors", retentionClass: "openstreetmap-pilot" };
 }
 
@@ -51,7 +53,7 @@ type PipelineInput = {
   externalRequestId: string;
   creditAuthorizationId?: string;
   label: string;
-  inputType: "csv_upload" | "domain_list" | "openstreetmap_discovery";
+  inputType: "csv_upload" | "domain_list" | "openstreetmap_discovery" | "ai_research";
   rawContent: string;
   fieldMapping?: Record<string, string>;
   categoryCode?: string;
