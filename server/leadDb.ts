@@ -184,9 +184,8 @@ export async function ingestUserLeads(input: PipelineInput) {
     operation: input.operation ?? "ingest",
     status: "running",
     categoryCode: input.categoryCode ?? null,
-    requestPayload: { source: isDiscovery ? "provider_discovery" : "user_provided", adapterKey: isDiscovery ? String(input.sourceMetadata?.adapterKey ?? "openstreetmap-pilot-v1") : "user-provided-v1", categoryCode: input.categoryCode ?? null, ...(input.sourceMetadata ?? {}) },
+    requestPayload: null,
     requestedCount: input.valid.length,
-    startedAt: new Date(),
   });
 
   let duplicateCount = 0;
