@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "NODE_OPTIONS='--import tsx' drizzle-kit generate && NODE_OPTIONS='--import tsx' drizzle-kit migrate",
+    "db:generate": "NODE_OPTIONS='--import tsx' drizzle-kit generate",
+    "db:push": "NODE_OPTIONS='--import tsx' drizzle-kit migrate",
     "neon:migrate": "NODE_OPTIONS='--import tsx' drizzle-kit migrate"
   },
   "dependencies": {

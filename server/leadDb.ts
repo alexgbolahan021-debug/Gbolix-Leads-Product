@@ -143,12 +143,17 @@ export async function listActiveCategories() {
 }
 
 export async function ingestUserLeads(input: PipelineInput) {
-  const db = await requireDb();
+  const rootDb = await requireDb();
   const workspaceId = input.workspaceId ?? OPERATOR_WORKSPACE_ID;
   await ensureEngineConfiguration(workspaceId, input.customerId);
   if (input.categoryCode) {
-    const [category] = await db.select().from(leadCategoryDefinitions).where(and(eq(leadCategoryDefinitions.code, input.categoryCode), eq(leadCategoryDefinitions.status, "active"))).limit(1);
+    const [category] = await rootDb.select().from(leadCategoryDefinitions).where(and(eq(leadCategoryDefinitions.code, input.categoryCode), eq(leadCategoryDefinitions.status, "active"))).limit(1);
     if (!category) throw new Error("Select an active category from the Gbolix Leads taxonomy before running the pipeline.");
+  }
+  return rootDb.transaction(async db => {
+  const [existingJob] = await db.select().from(leadJobs).where(eq(leadJobs.externalRequestId, input.externalRequestId)).limit(1);
+  if (existingJob) {
+    return { jobId: existingJob.id, sourceId: existingJob.ingestionSourceId ?? "", integrationEventId: "", createdCount: existingJob.qualifiedCount, duplicateCount: existingJob.duplicateCount, invalid: [], leadIds: [], chargeableCredits: existingJob.chargeableCredits };
   }
   const jobId = id("job");
   const sourceId = id("src");
@@ -178,6 +183,7 @@ export async function ingestUserLeads(input: PipelineInput) {
     invalidRows: input.invalid.length,
     createdBy: input.actorId ?? null,
   });
+  try {
   await db.insert(leadJobs).values({
     id: jobId,
     externalWorkspaceId: workspaceId,
@@ -193,6 +199,11 @@ export async function ingestUserLeads(input: PipelineInput) {
     requestPayload: {},
     requestedCount: input.valid.length,
   });
+  } catch (error) {
+    const details = error as { code?: string; detail?: string; hint?: string; constraint?: string; column?: string; table?: string; routine?: string };
+    console.error("lead_jobs insert failed", { code: details.code, detail: details.detail, hint: details.hint, constraint: details.constraint, column: details.column, table: details.table, routine: details.routine, error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 
   let duplicateCount = 0;
   let createdCount = 0;
@@ -282,6 +293,7 @@ export async function ingestUserLeads(input: PipelineInput) {
   });
   await db.insert(auditEvents).values({ id: id("audit"), externalWorkspaceId: workspaceId, actorId: input.actorId ?? null, action: isDiscovery ? "provider_discovery_ingested" : "user_source_ingested", entityType: "lead_job", entityId: jobId, metadata: { sourceId, createdCount, duplicateCount, invalidRows: input.invalid.length, adapterKey: isDiscovery ? String(input.sourceMetadata?.adapterKey ?? "openstreetmap-pilot-v1") : "user-provided-v1" } });
   return { jobId, sourceId, integrationEventId, createdCount, duplicateCount, invalid: input.invalid, leadIds: createdLeadIds, chargeableCredits: createdCount };
+  });
 }
 
 export async function ingestProviderDiscovery(input: Omit<PipelineInput, "inputType" | "rawContent" | "sourceDefinitionId" | "evidenceType" | "observationOrigin" | "operation"> & { adapterKey: string; requestMetadata: Record<string, unknown> }) {
