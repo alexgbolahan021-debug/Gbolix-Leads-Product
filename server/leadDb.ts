@@ -190,7 +190,7 @@ export async function ingestUserLeads(input: PipelineInput) {
     operation: input.operation === "discover" ? "ingest" : (input.operation ?? "ingest"),
     status: "running",
     categoryCode: input.categoryCode ?? null,
-    requestPayload: null,
+    requestPayload: {},
     requestedCount: input.valid.length,
   });
 
