@@ -19,14 +19,7 @@ function forgeConfig() {
   return forgeUrl && forgeKey ? { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey } : null;
 }
 
-export async function storagePut(relKey: string, data: Buffer | Uint8Array | string, contentType = "application/octet-stream"): Promise<StorageResult> {
-  const key = appendHashSuffix(normalizeKey(relKey)); const s3 = s3Config();
-  if (s3) {
-    await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: data, ContentType: contentType }));
-    return { key, url: s3.publicBaseUrl ? `${s3.publicBaseUrl}/${key}` : key };
-  }
-  const forge = forgeConfig();
-  if (!forge) throw new Error("Object storage is not configured. Set S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY.");
+async function putViaForge(key: string, data: Buffer | Uint8Array | string, contentType: string, forge: { forgeUrl: string; forgeKey: string }) {
   const presignUrl = new URL("v1/storage/presign/put", `${forge.forgeUrl}/`); presignUrl.searchParams.set("path", key);
   const presign = await fetch(presignUrl, { headers: { Authorization: `Bearer ${forge.forgeKey}` } });
   if (!presign.ok) throw new Error(`Storage presign failed (${presign.status})`);
@@ -34,6 +27,24 @@ export async function storagePut(relKey: string, data: Buffer | Uint8Array | str
   const uploaded = await fetch(url, { method: "PUT", headers: { "Content-Type": contentType }, body: typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data as any], { type: contentType }) });
   if (!uploaded.ok) throw new Error(`Storage upload failed (${uploaded.status})`);
   return { key, url: `/manus-storage/${key}` };
+}
+
+export async function storagePut(relKey: string, data: Buffer | Uint8Array | string, contentType = "application/octet-stream"): Promise<StorageResult> {
+  const key = appendHashSuffix(normalizeKey(relKey)); const s3 = s3Config();
+  if (s3) {
+    try {
+      await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: data, ContentType: contentType }));
+      return { key, url: s3.publicBaseUrl ? `${s3.publicBaseUrl}/${key}` : key };
+    } catch (error) {
+      const forge = forgeConfig();
+      if (!forge) throw error;
+      console.warn("S3 upload failed; falling back to Forge storage", { key, error: error instanceof Error ? error.message : String(error) });
+      return putViaForge(key, data, contentType, forge);
+    }
+  }
+  const forge = forgeConfig();
+  if (!forge) throw new Error("Object storage is not configured. Set S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY.");
+  return putViaForge(key, data, contentType, forge);
 }
 
 export async function storageGet(relKey: string): Promise<StorageResult> { const key = normalizeKey(relKey); const s3 = s3Config(); return { key, url: s3?.publicBaseUrl ? `${s3.publicBaseUrl}/${key}` : key }; }
