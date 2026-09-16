@@ -154,12 +154,15 @@ export async function ingestUserLeads(input: PipelineInput) {
   const sourceId = id("src");
   const sourceDefinitionId = input.sourceDefinitionId ?? USER_SOURCE_DEFINITION_ID;
   const isDiscovery = input.inputType === "openstreetmap_discovery";
-  let rawObject: { key: string; url: string };
-  try {
-    rawObject = await storagePut(`gbolix-leads/${workspaceId}/sources/${sourceId}/original-input.${isDiscovery ? "json" : "txt"}`, input.rawContent, isDiscovery ? "application/json" : "text/plain");
-  } catch (error) {
-    console.warn("Lead source archival unavailable; continuing ingestion", { sourceId, error: error instanceof Error ? error.message : String(error) });
-    rawObject = { key: `unarchived/${sourceId}`, url: "" };
+  let rawObject: { key: string; url: string } = { key: `unarchived/${sourceId}`, url: "" };
+  // Provider research is already persisted as structured leads/evidence below.
+  // Do not make Manus-to-Leads ingestion depend on the optional object store.
+  if (!isDiscovery) {
+    try {
+      rawObject = await storagePut(`gbolix-leads/${workspaceId}/sources/${sourceId}/original-input.txt`, input.rawContent, "text/plain");
+    } catch (error) {
+      console.warn("Lead source archival unavailable; continuing ingestion", { sourceId, error: error instanceof Error ? error.message : String(error) });
+    }
   }
   await db.insert(ingestionSources).values({
     id: sourceId,
