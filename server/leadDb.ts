@@ -154,7 +154,13 @@ export async function ingestUserLeads(input: PipelineInput) {
   const sourceId = id("src");
   const sourceDefinitionId = input.sourceDefinitionId ?? USER_SOURCE_DEFINITION_ID;
   const isDiscovery = input.inputType === "openstreetmap_discovery";
-  const rawObject = await storagePut(`gbolix-leads/${workspaceId}/sources/${sourceId}/original-input.${isDiscovery ? "json" : "txt"}`, input.rawContent, isDiscovery ? "application/json" : "text/plain");
+  let rawObject: { key: string; url: string };
+  try {
+    rawObject = await storagePut(`gbolix-leads/${workspaceId}/sources/${sourceId}/original-input.${isDiscovery ? "json" : "txt"}`, input.rawContent, isDiscovery ? "application/json" : "text/plain");
+  } catch (error) {
+    console.warn("Lead source archival unavailable; continuing ingestion", { sourceId, error: error instanceof Error ? error.message : String(error) });
+    rawObject = { key: `unarchived/${sourceId}`, url: "" };
+  }
   await db.insert(ingestionSources).values({
     id: sourceId,
     externalWorkspaceId: workspaceId,
