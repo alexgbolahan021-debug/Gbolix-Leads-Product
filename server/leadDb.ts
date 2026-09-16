@@ -184,7 +184,10 @@ export async function ingestUserLeads(input: PipelineInput) {
     externalRequestId: input.externalRequestId,
     creditAuthorizationId: input.creditAuthorizationId ?? null,
     ingestionSourceId: sourceId,
-    operation: input.operation ?? "ingest",
+    // Older production databases use an enum that does not include "discover".
+    // Discovery is still represented by the source/input metadata; keep the
+    // job operation on the existing compatible value for schema compatibility.
+    operation: input.operation === "discover" ? "ingest" : (input.operation ?? "ingest"),
     status: "running",
     categoryCode: input.categoryCode ?? null,
     requestPayload: null,
