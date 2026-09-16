@@ -69,14 +69,15 @@ const resultsSchema = z.object({
 });
 
 function verifySignedPayload(req: Request, payload: unknown) {
-  return verifyGbolixInboundSignature(getIntegrationSecret(), req.header("x-gbolix-timestamp"), req.header("x-gbolix-signature"), payload);
+  const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+  return verifyGbolixInboundSignature(getIntegrationSecret(), req.header("x-gbolix-timestamp"), req.header("x-gbolix-signature"), rawBody ? rawBody.toString("utf8") : payload);
 }
 
 export function verifyGbolixInboundSignature(secret: string, timestamp: string | undefined, signature: string | undefined, payload: unknown) {
   if (!timestamp || !signature) return false;
   const issuedAt = Date.parse(timestamp);
   if (!Number.isFinite(issuedAt) || Math.abs(Date.now() - issuedAt) > 5 * 60 * 1000) return false;
-  const expected = createHmac("sha256", secret).update(`${timestamp}.${JSON.stringify(payload)}`).digest("hex");
+  const expected = createHmac("sha256", secret).update(`${timestamp}.${typeof payload === "string" ? payload : JSON.stringify(payload)}`).digest("hex");
   const providedBuffer = Buffer.from(signature, "hex");
   const expectedBuffer = Buffer.from(expected, "hex");
   return providedBuffer.length === expectedBuffer.length && timingSafeEqual(providedBuffer, expectedBuffer);
