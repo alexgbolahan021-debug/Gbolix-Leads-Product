@@ -71,6 +71,27 @@ function id(prefix: string) {
   return `${prefix}_${nanoid(21)}`;
 }
 
+function normalizeCountryCode(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (/^[A-Za-z]{2}$/.test(normalized)) return normalized.toUpperCase();
+  const aliases: Record<string, string> = {
+    "united states": "US",
+    "united states of america": "US",
+    usa: "US",
+    canada: "CA",
+    nigeria: "NG",
+    "united kingdom": "GB",
+    uk: "GB",
+    australia: "AU",
+    germany: "DE",
+    france: "FR",
+    india: "IN",
+    "south africa": "ZA",
+  };
+  return aliases[normalized.toLowerCase()] ?? null;
+}
+
 async function requireDb() {
   const db = await getDb();
   if (!db) throw new Error("The Gbolix Leads database is unavailable.");
@@ -248,7 +269,7 @@ export async function ingestUserLeads(input: PipelineInput) {
       canonicalEmail,
       phone: candidate.phone || null,
       canonicalPhone,
-      country: candidate.country || null,
+      country: normalizeCountryCode(candidate.country),
       region: candidate.region || null,
       city: candidate.city || null,
       address: candidate.address || null,
